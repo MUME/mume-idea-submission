@@ -11,6 +11,7 @@ import {
 
 export interface AdminSession {
   u: string; // discord user id (Council-verified at login)
+  n?: string; // display name (for attributing review proposals/seconds)
   exp: number;
 }
 

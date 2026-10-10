@@ -18,6 +18,10 @@ See [`../idea-board-build-spec.md`](../idea-board-build-spec.md) for the full sp
   Council role, with Submitted locking the post.
 - Form questions live in KV and are versioned, so old ideas keep rendering with the
   labels they were submitted under.
+- **Council idea review**: an off-site, Council-gated assessment surface (scoring
+  rubric + gate checks + two-person seconding) at `/admin/review?idea=N`, linked from
+  each idea's review copy and posting results back to Discord. See
+  [`ASSESSMENT.md`](ASSESSMENT.md).
 
 ## Stack
 

@@ -7,6 +7,13 @@ import { buildEmbed, buildIdeaComponents, ideaThreadName } from "./embed";
 
 const AUTO_ARCHIVE = 10080; // 7 days, the max
 
+// Append a link button that opens the off-site Council review page for this idea.
+// Only added to the private review copies, never the public post.
+function withAssessButton(env: Env, ideaId: number, components: Record<string, unknown>[]): Record<string, unknown>[] {
+  const url = `${env.PUBLIC_BASE_URL}/admin/review?idea=${ideaId}`;
+  return [...components, { type: 1, components: [{ type: 2, style: 5, label: "Assess idea", url }] }];
+}
+
 interface ForumTag {
   id?: string;
   name: string;
@@ -117,7 +124,7 @@ export async function createReviewPost(
       auto_archive_duration: AUTO_ARCHIVE,
       message: {
         embeds: [buildEmbed(idea, config)],
-        components: buildIdeaComponents(idea.id),
+        components: withAssessButton(env, idea.id, buildIdeaComponents(idea.id)),
       },
     },
   });
@@ -198,7 +205,7 @@ export async function refreshIdeaPost(env: Env, idea: IdeaRow, config: FormConfi
   if (idea.review_thread_id && idea.review_message_id) {
     await discordFetch(env, `/channels/${idea.review_thread_id}/messages/${idea.review_message_id}`, {
       method: "PATCH",
-      body: { embeds: [embed], components: buildIdeaComponents(idea.id) },
+      body: { embeds: [embed], components: withAssessButton(env, idea.id, buildIdeaComponents(idea.id)) },
     }).catch((e) => console.error("review refresh failed", e));
     await discordFetch(env, `/channels/${idea.review_thread_id}`, { method: "PATCH", body: { name } }).catch(() => {});
   }
