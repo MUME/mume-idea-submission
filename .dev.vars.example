@@ -1,0 +1,26 @@
+# Copy to .dev.vars for `wrangler dev`, and set each of these in production with
+# `wrangler secret put <NAME>`. Never commit real values. .dev.vars is gitignored.
+
+# From the dev portal -> your app -> General Information
+DISCORD_APP_ID=
+DISCORD_PUBLIC_KEY=
+DISCORD_CLIENT_SECRET=
+
+# Bot -> Reset Token
+DISCORD_BOT_TOKEN=
+
+# The test server (Server Settings -> enable Developer Mode -> right-click server)
+DISCORD_GUILD_ID=
+
+# The #idea-submission-2 forum channel id (right-click the channel -> Copy Channel ID)
+FORUM_CHANNEL_ID=
+
+# The White Council role id (Server Settings -> Roles -> right-click -> Copy Role ID)
+COUNCIL_ROLE_ID=
+
+# Random 32+ byte secret you generate, e.g. `openssl rand -hex 32`. Signs the
+# Activity session token. Rotating it just forces open forms to re-handshake.
+SESSION_SIGNING_KEY=
+
+# Random bearer token you generate, guards PUT/GET /admin/config.
+ADMIN_TOKEN=

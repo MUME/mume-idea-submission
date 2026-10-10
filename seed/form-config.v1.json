@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "title": "Submit an idea",
+  "subtitle": "Multi-Users in Middle-earth",
+  "intro": [
+    "Submit one distinct idea per form",
+    "Submitting does not imply acceptance. Ideas may be modified, combined with other proposals, or declined after review",
+    "Use your best judgement. You are not expected to know how MUME is implemented internally"
+  ],
+  "pages": [
+    {
+      "id": "idea",
+      "title": "The idea",
+      "fields": [
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Give your idea a short, clear title",
+          "help": "Make it immediately clear what the proposal is about.",
+          "required": true,
+          "maxLength": 100,
+          "placeholder": "Stablehands hold mounts overnight in Bree",
+          "errorName": "a title"
+        },
+        {
+          "id": "purpose",
+          "type": "radio",
+          "label": "What is the primary purpose of this idea?",
+          "help": "Choose the one option that best captures the main reason for the proposal.",
+          "required": true,
+          "errorName": "the primary purpose",
+          "embedLabel": "Purpose",
+          "options": [
+            { "value": "problem", "label": "Solve a problem or frustration", "description": "Something confusing, inconvenient, frustrating, broken, or otherwise detracting from play." },
+            { "value": "feature", "label": "Add a missing feature", "description": "A feature, activity, system, or capability MUME does not currently offer." },
+            { "value": "newbie", "label": "Improve the newbie experience", "description": "Makes MUME easier to understand, enter, learn, or navigate for new or returning players." },
+            { "value": "balance", "label": "Address a balance concern", "description": "Balance between classes, races, sides, strategies, equipment, rewards, or other gameplay elements." },
+            { "value": "extend", "label": "Improve or extend an existing mechanic", "description": "Builds on, expands, revises, or adds new uses to something that already exists." },
+            { "value": "qol", "label": "Improve quality of life", "description": "Reduces friction, repetitive work, or confusion without substantially changing core gameplay." },
+            { "value": "lore", "label": "Improve lore or immersion", "description": "Atmosphere, world consistency, Tolkien fidelity, roleplay, or the sense of being in Middle-earth." },
+            { "value": "enjoyable", "label": "Add something enjoyable or interesting", "description": "Variety, replayability, flavour, or optional activity that makes the game more engaging." },
+            { "value": "other", "label": "Other", "description": "The idea does not fit the categories above." }
+          ]
+        },
+        {
+          "id": "proposal",
+          "type": "textarea",
+          "label": "Describe your proposal",
+          "help": "Explain the change clearly enough that someone unfamiliar with the idea can understand what would be different.",
+          "required": true,
+          "maxLength": 2000,
+          "placeholder": "What is the mechanic, feature, change, or content, and how would it work in practice?",
+          "errorName": "your proposal",
+          "guidance": [
+            "The proposed mechanic, feature, change, or content",
+            "How it would work at a practical level",
+            "Whether it uses or extends an existing MUME mechanic",
+            "One distinct idea only. No implementation-level technical detail needed"
+          ]
+        },
+        {
+          "id": "outcome",
+          "type": "textarea",
+          "label": "What would this improve?",
+          "help": "What problem does it solve, what opportunity does it create, or what should be better for players if it works?",
+          "required": true,
+          "maxLength": 1500,
+          "placeholder": "What is missing, frustrating, underused, or limited today, and what changes for players.",
+          "errorName": "what it would improve",
+          "embedLabel": "What it improves",
+          "guidance": [
+            "What is currently missing, frustrating, underused, confusing, or limited",
+            "What player behaviour or experience it is meant to improve",
+            "Whether it helps replayability, grouping, exploration, balance, immersion, retention, or the economy",
+            "Whether the objective still holds if the exact implementation changes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "title": "Scope and impact",
+      "fields": [
+        {
+          "id": "affected",
+          "type": "checkbox",
+          "label": "Who might be affected by this idea?",
+          "help": "Select every player group or style of play that could be meaningfully affected.",
+          "required": true,
+          "errorName": "who is affected",
+          "embedLabel": "Affects",
+          "options": [
+            { "value": "new", "label": "New players", "description": "New to MUME or still learning its systems and world." },
+            { "value": "returning", "label": "Returning players", "description": "Back after a long absence, relearning systems, commands, or conventions." },
+            { "value": "solo", "label": "Solo players", "description": "Commonly explore, XP, quest, or travel alone." },
+            { "value": "group", "label": "Group players", "description": "Organised or informal groups for XP, quests, SMOBs, or travel." },
+            { "value": "pve", "label": "PvE-focused players", "description": "Mobs, XP, SMOBs, quests, exploration, or equipment acquisition." },
+            { "value": "pk", "label": "PK / PvP-focused players", "description": "Player-killing, side balance, escape and chase, combat strategy, scouting, raiding." },
+            { "value": "rp", "label": "Roleplayers and immersion-focused players", "description": "Lore, descriptions, atmosphere, communication, or roleplay systems." },
+            { "value": "most", "label": "Most or all players", "description": "Broad enough that nearly everyone would encounter or benefit from it." },
+            { "value": "other", "label": "Other", "description": "Another player group not represented above." }
+          ]
+        },
+        {
+          "id": "systems",
+          "type": "checkbox",
+          "label": "What parts of MUME might be affected?",
+          "help": "Select every system, content area, or gameplay element that may need to be considered.",
+          "required": true,
+          "layout": "cols",
+          "errorName": "the parts affected",
+          "embedLabel": "Systems",
+          "options": [
+            { "value": "xp", "label": "XP and progression", "description": "Levelling, practice points, training, advancement, rerolls." },
+            { "value": "pk", "label": "PK and PvP", "description": "Player combat, war points, side balance, raiding, escape, tracking." },
+            { "value": "combat", "label": "Combat, skills and spells", "description": "Mechanics, abilities, saves, damage, status effects." },
+            { "value": "economy", "label": "Economy and equipment", "description": "Gold, shops, item value, sinks, durability, rare gear." },
+            { "value": "mobs", "label": "Mobs and objects", "description": "Mobile behaviour, stats, drops, object properties and interactions." },
+            { "value": "quests", "label": "Quests", "description": "Structure, rewards, objectives, dialogue, tokens, repeatability." },
+            { "value": "smobs", "label": "SMOBs and group encounters", "description": "Encounter design, group difficulty, phases, rewards." },
+            { "value": "zones", "label": "Zones and world content", "description": "Rooms, travel routes, hidden areas, geography, zone activity." },
+            { "value": "newbie", "label": "Newbie systems", "description": "Newbie areas, onboarding, tutorials, starter gear, early guidance." },
+            { "value": "commands", "label": "Commands and interface", "description": "Syntax, prompts, output, information presentation, mmapper, usability." },
+            { "value": "helpfiles", "label": "Helpfiles and documentation", "description": "Written guidance, terminology, examples, discoverability." },
+            { "value": "lore", "label": "Lore, descriptions and immersion", "description": "Room and mob descriptions, naming, consistency, flavour text." },
+            { "value": "social", "label": "Social and group formation", "description": "Group finding, communication, incentives to group, cooperation." },
+            { "value": "other", "label": "Other", "description": "Another system or content area not listed." }
+          ]
+        },
+        {
+          "id": "impact",
+          "type": "radio",
+          "label": "Estimate the likely impact",
+          "help": "How broadly could the change affect MUME? This is only your best estimate.",
+          "required": true,
+          "errorName": "the likely impact",
+          "embedLabel": "Impact",
+          "options": [
+            { "value": "limited", "label": "Limited", "description": "Affects a narrow situation, area, mechanic, or relatively small number of players." },
+            { "value": "moderate", "label": "Moderate", "description": "Noticeably affects a playstyle, region, player group, or recurring part of the game." },
+            { "value": "major", "label": "Major", "description": "Game-wide effects, or significant effects on balance, strategy, progression, PK, or the economy." }
+          ]
+        },
+        {
+          "id": "extra",
+          "type": "textarea",
+          "label": "Additional details or examples",
+          "help": "Optional. Anything that helps reviewers understand or evaluate the proposal.",
+          "required": false,
+          "maxLength": 1500,
+          "placeholder": "Precedents, helpfiles, logs, lore references, or examples of the problem.",
+          "embedLabel": "Additional details",
+          "guidanceLabel": "Useful things to add",
+          "guidance": [
+            "Existing MUME mechanics that set a precedent, or related content that could be reused",
+            "Relevant helpfiles or commands",
+            "Logs or gameplay examples of the problem",
+            "Lore references",
+            "Similar mechanics elsewhere in MUME, or in other games"
+          ]
+        }
+      ]
+    }
+  ],
+  "embed": {
+    "titleField": "title",
+    "bodyField": "proposal",
+    "summaryFields": ["purpose", "affected", "systems", "impact"],
+    "detailFields": ["outcome", "extra"]
+  }
+}

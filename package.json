@@ -1,0 +1,28 @@
+{
+  "name": "mume-idea-submission",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Discord idea submission and review pipeline for the White Council server, as a Discord Activity",
+  "type": "module",
+  "scripts": {
+    "build:client": "node scripts/build-client.mjs",
+    "dev": "npm run build:client && wrangler dev",
+    "deploy": "npm run build:client && wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/build-tests.mjs && node --test test/.build/*.mjs",
+    "register": "node scripts/register-commands.mjs",
+    "seed": "node scripts/seed-config.mjs",
+    "db:migrate:local": "wrangler d1 migrations apply mume_ideas --local",
+    "db:migrate:remote": "wrangler d1 migrations apply mume_ideas --remote",
+    "deploy:staging": "npm run build:client && wrangler deploy --env staging",
+    "db:migrate:staging": "wrangler d1 migrations apply mume_ideas_staging --remote --env staging",
+    "secrets": "node scripts/set-secrets.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260804.1",
+    "@discord/embedded-app-sdk": "^1.9.0",
+    "esbuild": "^0.23.1",
+    "typescript": "^5.6.2",
+    "wrangler": "^4.0.0"
+  }
+}

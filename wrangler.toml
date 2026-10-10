@@ -1,0 +1,66 @@
+# MUME Idea Submission — Cloudflare Worker
+#
+# This targets the TEST app/server for now. Moving to production is config-only:
+# swap the secrets (see .dev.vars.example / `wrangler secret put`), re-point the
+# Activity URL mapping + Entry Point command in the dev portal, and recreate the
+# forum tags/permissions on the production channel. No code changes.
+
+name = "mume-idea-submission"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# The built client bundle (client/main.ts -> src/generated/app.client.js) and the
+# migration SQL are imported into the Worker as strings.
+rules = [
+  { type = "Text", globs = ["**/*.client.js"], fallthrough = true }
+]
+
+# Non-secret vars. Secrets (tokens, keys) go through `wrangler secret put` — never here.
+[vars]
+PUBLIC_BASE_URL = "https://mume-idea-submission.mume-idea-submission.workers.dev"
+
+# Daily cron (noon UTC): retries any idea row that never got its forum post, and
+# sends the one-time 30-day "still open" notice. Daily so that notice lands near
+# the 30-day mark rather than up to a week late.
+[triggers]
+crons = ["0 12 * * *"]
+
+# --- Bindings --------------------------------------------------------------
+# Create these once, then paste the ids below:
+#   wrangler d1 create mume_ideas
+#   wrangler kv namespace create CONFIG
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mume_ideas"
+database_id = "20a1d96f-2c21-40f3-b753-cb9d7b55f0d8"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "CONFIG"
+id = "dbabc2f4fe4f483faf939242d1f404a2"
+
+# --- Staging -------------------------------------------------------------
+# A second, independent copy that runs alongside the live one. It has its own
+# Worker URL, its own database + KV, its own secrets, and its own Discord app.
+# Deploy it with `wrangler deploy --env staging` (the plain `wrangler deploy`
+# still targets the live instance above). See STAGING.md for the full checklist.
+
+[env.staging]
+name = "mume-idea-submission-staging"
+
+[env.staging.vars]
+PUBLIC_BASE_URL = "https://mume-idea-submission-staging.mark-smith-1f9.workers.dev"
+
+[env.staging.triggers]
+crons = ["0 12 * * *"]
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "mume_ideas_staging"
+database_id = "542cb4ae-45ca-49a0-8380-6e3bd3247e7c"
+migrations_dir = "migrations"
+
+[[env.staging.kv_namespaces]]
+binding = "CONFIG"
+id = "c039d4f0f6924c1794adfa7f3be80f7a"
