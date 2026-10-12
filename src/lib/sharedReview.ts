@@ -1,4 +1,4 @@
-// Pure shared-draft rules. All agreements cover the complete, exact revision.
+// Independent approvals: one second for checks; three agreements on final scores.
 import { CRITERIA, CHECKS, BANDS } from "./rubric";
 import type { IdeaRow } from "../types";
 export const AGREEMENTS_REQUIRED = 3;
@@ -24,6 +24,35 @@ export function contentOf(
   idea: Pick<IdeaRow, "title" | "answers" | "schema_version">,
 ): string {
   return JSON.stringify([idea.title, idea.answers, idea.schema_version]);
+}
+export function scoreSignature(d: ReviewDraft): string {
+  return JSON.stringify(
+    CRITERIA.map((c) => [c.id, d.scores[c.id], d.reasons[c.id] ?? ""]),
+  );
+}
+export function checksSignature(d: ReviewDraft): string {
+  return JSON.stringify([
+    CHECKS.filter((c) => d.issues.includes(c.id)).map((c) => c.id),
+    d.issues.length ? d.issueReason : "",
+  ]);
+}
+export function checksAgreed(
+  d: ReviewDraft,
+  proposer: string | null,
+  seconder: string | null,
+): boolean {
+  return !d.issues.length || !!(proposer && seconder && proposer !== seconder);
+}
+export function readyToClose(
+  d: ReviewDraft,
+  scoreVotes: number,
+  proposer: string | null,
+  seconder: string | null,
+): boolean {
+  const result = draftResult(d);
+  if (result.flags.length)
+    return result.ready && checksAgreed(d, proposer, seconder);
+  return result.total !== null && scoreVotes >= AGREEMENTS_REQUIRED;
 }
 export function validateDraft(d: ReviewDraft): void {
   if (!d || !d.scores || !d.reasons || !Array.isArray(d.issues))

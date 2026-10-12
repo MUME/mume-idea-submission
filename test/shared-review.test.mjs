@@ -17,6 +17,8 @@ import {
   withdrawAgreement,
   reservePublish,
   finishPublish,
+  secondChecks,
+  withdrawChecksSecond,
 } from "../src/lib/sharedReviewDb.ts";
 import { updateIdeaAnswers, updateStatus } from "../src/lib/db.ts";
 import {
@@ -78,6 +80,7 @@ async function fixture() {
     "0002_review_copy.sql",
     "0003_assessments.sql",
     "0004_shared_council_review.sql",
+    "0005_separate_checks_and_scores.sql",
   ]) {
     // Execute schema statements separately; SQL comments can include semicolons.
     const sql = readFileSync("migrations/" + name, "utf8").replace(
@@ -141,7 +144,7 @@ test("new rubric: defaults, all 125 totals, flag precedence and input bounds", (
   );
   assert.match(feedbackFor({ id: 1, title: "Help" }, complete()), /14\/20/);
 });
-test("D1: three distinct whole-review agreements, revisions, audit, stale ideas, publication", async () => {
+test("D1: three distinct final-score agreements, revisions, audit, stale ideas, publication", async () => {
   const { mf, env, idea } = await fixture();
   try {
     let r = await getReview(env, idea);
@@ -172,6 +175,7 @@ test("D1: three distinct whole-review agreements, revisions, audit, stale ideas,
     await agreeReview(env, r, C);
     const revised = complete();
     revised.note = "Final feedback changed";
+    revised.scores.usefulness = 5;
     await editReview(env, r, idea, revised, B, "Updated feedback");
     r = await getReview(env, idea);
     assert.equal((await agreements(env, r)).length, 0);
@@ -450,6 +454,118 @@ test("native publication recovery reuses a previously delivered bot message", as
     assert.equal(r.status, "published");
   } finally {
     globalThis.fetch = originalFetch;
+    await mf.dispose();
+  }
+});
+test("checks: one second endorses the whole selection; approvals remain independent", async () => {
+  const { mf, env, idea } = await fixture();
+  try {
+    let r = await getReview(env, idea),
+      d = complete();
+    await editReview(env, r, idea, d, A, "Initial scores");
+    r = await getReview(env, idea);
+    await agreeReview(env, r, A);
+    await agreeReview(env, r, B);
+    await agreeReview(env, r, C);
+    d.issues = ["clarity", "evidence"];
+    d.issueReason = "Clarify the commands and provide examples.";
+    await editReview(env, r, idea, d, A, "Flag both checks");
+    r = await getReview(env, idea);
+    assert.equal(
+      (await agreements(env, r)).length,
+      3,
+      "Checks must not reset score votes",
+    );
+    await assert.rejects(reservePublish(env, r), /second/);
+    await assert.rejects(secondChecks(env, r, A), /different member/);
+    await secondChecks(env, r, B);
+    r = await getReview(env, idea);
+    assert.equal(r.checks_proposer_id, A.id);
+    assert.equal(r.checks_seconder_id, B.id);
+    await assert.rejects(secondChecks(env, r, C), /already/);
+    assert.equal(
+      JSON.parse(r.draft).issues.length,
+      2,
+      "One second covers both issues",
+    );
+    const oldScoreRevision = r.score_revision;
+    d.scores.usefulness = 5;
+    await editReview(env, r, idea, d, C, "More useful than first thought");
+    r = await getReview(env, idea);
+    assert.equal(r.score_revision, oldScoreRevision + 1);
+    assert.equal((await agreements(env, r)).length, 0);
+    assert.equal(
+      r.checks_seconder_id,
+      B.id,
+      "Score change must retain the checks second",
+    );
+    await agreeReview(env, r, A);
+    await agreeReview(env, r, B);
+    await agreeReview(env, r, C);
+    d.note = "Internal response guidance";
+    await editReview(env, r, idea, d, A, "Council note");
+    r = await getReview(env, idea);
+    assert.equal((await agreements(env, r)).length, 3);
+    assert.equal(r.checks_seconder_id, B.id);
+    d.issueReason = "Revised explanation";
+    await editReview(env, r, idea, d, C, "Clarified checks");
+    r = await getReview(env, idea);
+    assert.equal(r.checks_seconder_id, null);
+    assert.equal(r.checks_proposer_id, C.id);
+    assert.equal((await agreements(env, r)).length, 3);
+    await assert.rejects(secondChecks(env, r, C));
+    await secondChecks(env, r, B);
+    r = await getReview(env, idea);
+    await assert.rejects(withdrawChecksSecond(env, r, A));
+    await withdrawChecksSecond(env, r, B);
+    r = await getReview(env, idea);
+    assert.equal(r.checks_seconder_id, null);
+    await assert.rejects(reservePublish(env, r));
+    await secondChecks(env, r, A);
+    r = await getReview(env, idea);
+    d.issues = [];
+    d.issueReason = "";
+    await editReview(env, r, idea, d, B, "Checks resolved");
+    r = await getReview(env, idea);
+    assert.equal(r.checks_proposer_id, null);
+    assert.equal(r.checks_seconder_id, null);
+    assert.equal((await agreements(env, r)).length, 3);
+    await reservePublish(env, r);
+  } finally {
+    await mf.dispose();
+  }
+});
+test("selected checks can be recorded with one second, without voting on unfinished scores", async () => {
+  const { mf, env, idea } = await fixture();
+  try {
+    let r = await getReview(env, idea);
+    const d = emptyDraft();
+    d.issues = ["split", "clarity"];
+    d.issueReason = "Two separate proposals; clarify each.";
+    await editReview(env, r, idea, d, A, "Triage");
+    r = await getReview(env, idea);
+    await assert.rejects(agreeReview(env, r, A), /all three scores/);
+    await assert.rejects(reservePublish(env, r));
+    await secondChecks(env, r, B);
+    r = await getReview(env, idea);
+    assert.equal((await agreements(env, r)).length, 0);
+    const payload = await reviewPayload(env, idea, r);
+    const buttons = payload.components.flatMap((row) => row.components);
+    assert.equal(
+      buttons.find((b) => b.custom_id?.includes(":agree:")).disabled,
+      true,
+    );
+    assert.equal(
+      buttons.find((b) => b.custom_id?.includes(":publish:")).disabled,
+      false,
+    );
+    assert.ok(payload.components.length <= 5);
+    assert.ok(payload.components.every((row) => row.components.length <= 5));
+    await reservePublish(env, r);
+    await finishPublish(env, r, "internal-record", B);
+    r = await getReview(env, idea);
+    assert.equal(r.status, "published");
+  } finally {
     await mf.dispose();
   }
 });

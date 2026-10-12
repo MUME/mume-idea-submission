@@ -1,38 +1,44 @@
 # Council assessment in Discord
 
 This replaces the per-item propose/second workflow from PR #1 with a fluid shared
-assessment and three agreements on its complete final wording.
+assessment, one second on the complete selected checks, and three agreements on
+the final scores.
 
 ## Review flow
 
-1. In the private submitted-ideas forum, click **Assess idea**. A Council-only,
-   ephemeral panel opens inside Discord. Every reviewer reads/edits the same draft
-   stored in D1; panels are personal snapshots, so use **Refresh** to see others'
-   changes. The interface stacks native Discord embeds, a select menu and buttons.
-2. **Issues requiring action** is a multi-select dropdown. Select any applicable
-   issues, then explain them in the modal. Nothing selected means the checks pass
-   by default. Removing issues also requires a reason. There are no per-item seconds.
-3. **Adjust scores / feedback** opens a five-field Discord form: the three scores
-   (enter `4 | reason`, for example), final internal Council note / response guidance, and why you are revising
-   the assessment. Each score is 1–5; blank means unassessed. Feasibility counts twice
-   and measures effort only. With no issues, all three scores are required before
-   agreement. With issues, explained return/defer feedback can be agreed without
-   finishing numeric scores. No-change submissions do not invalidate agreements.
-4. Each Council member explicitly clicks **Agree with assessment** on the version
-   they reviewed. The editor is allowed to agree, but editing does not count as
-   agreement. Three distinct Discord IDs are required, not three clicks. Members
-   can withdraw their own agreement before internal recording.
-5. Any change to a score, explanation, selected issues or final feedback increments
-   the whole-assessment revision. Previous agreements remain in history but no
-   longer count. Concurrent stale edits and agreements are rejected. Editing the
-   underlying idea also makes the assessment stale; revise it against the updated
-   idea before new agreements or internal recording.
-6. **Preview internal summary** shows the exact internal summary inside Discord. After three
-   agreements, **Close and record internally** posts it only to the private Council review thread and freezes
-   the assessment. Issues override the numerical recommendation. Internal recording is
-   explicit; nothing is automatically posted at the third agreement.
-7. **Reopen assessment** explicitly starts a new revision for further discussion,
-   requiring three new agreements. A Resolved idea must itself be reopened first.
+1. In the private submitted-ideas forum, click **Assess idea**. A Council-only
+   ephemeral panel opens inside Discord. Panels are personal snapshots of a shared
+   D1 draft; use **Refresh** to see others' changes.
+2. **Issues requiring action** is a multi-select dropdown. Pick one or more issues
+   and explain them in the modal. None selected means pass by default, with no second.
+   Another Council member clicks **Second** once to endorse the
+   entire selection and its explanation. A member cannot second their own selection.
+   The seconder can withdraw their second; changing the selection or explanation
+   clears the second and attributes the new selection to the editor.
+3. **Adjust scores / feedback** opens a five-field form: three scores (`4 | reason`,
+   for example), an internal note / response guidance, and the reason for the edit.
+   Scores remain fluid during discussion. Usefulness ×1, Feasibility ×2 (effort only),
+   Interest ×1 produces 4–20 and the existing recommendation bands.
+4. **Agree with final scores** is a separate step. Three distinct Council members
+   explicitly agree to the complete set of scores and their reasons. The editor
+   can be one of the three, but editing does not count as agreement. Members can
+   withdraw their own score agreement. No voting on incomplete scores.
+5. Approval scopes are independent. Score/reason changes reset only score agreements.
+   Check selection/explanation changes reset only the checks second. An internal-note
+   edit resets neither: that note is working material, not part of the score vote.
+   All changes are audited. Underlying idea changes invalidate both approval scopes;
+   revise against its new content before new approvals or internal recording.
+6. **Preview internal summary** shows what will be recorded. When no issues are
+   selected, **Close and record internally** requires all scores and three score
+   agreements. When issues are selected, the complete check selection needs one
+   second; that return/defer outcome overrides scores and can be recorded before
+   completing them. It does not label unfinished scores as agreed.
+7. Closing posts the assessment only to the private Council thread and freezes it.
+   A Council member uses it as the basis for a separately written response. Nothing
+   reaches the public board, author or reviewed exports through this feature.
+8. **Reopen assessment** explicitly restarts both approval scopes: checks need a
+   fresh second if selected, and scores need three fresh agreements. A Resolved
+   idea must first be reopened using the status dropdown.
 
 The existing In Proposal / Final Draft / Submitted / Reviewed / Resolved status
 workflow stays separate. Closing an assessment does not change the idea status.
@@ -46,14 +52,18 @@ to the public board, the author, or reviewed exports.
 
 ## Storage and safeguards
 
-Migration `0004_shared_council_review.sql` adds shared drafts, revision-scoped
-agreements and full-snapshot event history. Acknowledged Discord IDs and role lists
+Migration 0004 adds shared drafts and event history. Migration
+`0005_separate_checks_and_scores.sql` adds independent score/check revisions,
+checks proposer/seconder attribution and a separate score-agreement table. Existing
+whole-assessment agreement rows/history are retained but do not automatically count
+as final-score votes under the revised model. Acknowledged Discord IDs and role lists
 are checked server-side for each interaction. Read or write controls must originate
 in the idea's private review thread. Native mutation requests are acknowledged
 before database/Discord operations; opening a modal uses an immediate response.
 
 Revision updates use compare-and-swap SQL, with mutation and event logging in one
-D1 batch. Agreements are unique per idea, revision and actor. Events preserve the
+D1 batch. Score agreements are unique per idea, score revision and actor. Checks seconds are
+atomic, require a different member, and cover one complete check revision. Events preserve the
 whole draft, actor, reason and timestamp. An idea-content fingerprint prevents
 publishing an assessment of old content. During reserved publication, content and
 status edits are blocked until delivery is completed; use Retry internal recording if a
@@ -87,7 +97,7 @@ npx wrangler deploy --dry-run
 ```
 
 After review, the maintainer verifies the correct Cloudflare account, applies
-migration 0004 and deploys to staging, then production. Existing configured roles
+migrations 0004 and 0005 and deploys to staging, then production. Existing configured roles
 and permissions should suffice; the bot needs Send Messages, Embed Links, Manage
 Threads and Read Message History in the relevant forums. No new Discord portal
 configuration or command registration is needed.
@@ -107,7 +117,8 @@ and status refresh paths, so future edits do not remove it.
 ## Validation
 
 Tests cover all 125 new-rubric score combinations, no-issue defaults, flag precedence,
-input validation, three distinct agreements, repeated votes, withdrawals, stale
+input validation, three distinct score agreements, whole-selection checks seconding, independent
+approval invalidation, repeated votes, withdrawals, stale
 revisions/content, frozen publication, full event snapshots, and native role/guild
 checks. SQLite tests execute the production D1 SQL through a transactional adapter;
 real Discord interaction and deployed D1 acceptance are part of staging verification.

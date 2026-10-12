@@ -5,6 +5,8 @@ import {
   validateDraft,
   draftResult,
   AGREEMENTS_REQUIRED,
+  scoreSignature,
+  checksSignature,
 } from "./sharedReview";
 import type { ReviewDraft, Reviewer } from "./sharedReview";
 export interface SharedReview {
@@ -15,6 +17,12 @@ export interface SharedReview {
   draft: string;
   status: string;
   record_message_id: string | null;
+  score_revision: number;
+  checks_revision: number;
+  checks_proposer_id: string | null;
+  checks_proposer_name: string | null;
+  checks_seconder_id: string | null;
+  checks_seconder_name: string | null;
 }
 const now = () => Math.floor(Date.now() / 1000);
 export async function getReview(
@@ -63,9 +71,9 @@ export async function agreements(
   r: SharedReview,
 ): Promise<Reviewer[]> {
   const res = await env.DB.prepare(
-    "SELECT actor_id AS id, actor_name AS name FROM council_review_agreements WHERE idea_id=? AND revision=? ORDER BY at,actor_id",
+    "SELECT actor_id AS id, actor_name AS name FROM council_score_agreements WHERE idea_id=? AND score_revision=? ORDER BY at,actor_id",
   )
-    .bind(r.idea_id, r.revision)
+    .bind(r.idea_id, r.score_revision)
     .all<Reviewer>();
   return res.results ?? [];
 }
@@ -96,15 +104,37 @@ export async function editReview(
   validateDraft(draft);
   if (!reason.trim() || reason.length > 1000)
     throw Error("Explain the revision (up to 1000 characters).");
-  if (r.draft === JSON.stringify(draft) && r.idea_content === contentOf(idea))
+  const previous: ReviewDraft = JSON.parse(r.draft);
+  const contentChanged = r.idea_content !== contentOf(idea);
+  const scoresChanged =
+    contentChanged || scoreSignature(previous) !== scoreSignature(draft);
+  const checksChanged =
+    contentChanged ||
+    checksSignature(previous) !== checksSignature(draft) ||
+    (draft.issues.length > 0 && !r.checks_proposer_id);
+  if (r.draft === JSON.stringify(draft) && !contentChanged && !checksChanged)
     throw Error("No assessment changes to save.");
   const next = { ...r, revision: r.revision + 1 };
   const res = await env.DB.batch([
     env.DB.prepare(
-      `UPDATE council_reviews SET draft=?,idea_content=?,revision=revision+1,status='open',record_message_id=NULL,updated_at=? WHERE idea_id=? AND revision=? AND status='open' AND (SELECT status FROM ideas WHERE id=?)!='resolved'`,
+      `UPDATE council_reviews SET draft=?,idea_content=?,revision=revision+1,
+       score_revision=score_revision+?,checks_revision=checks_revision+?,
+       checks_proposer_id=CASE WHEN ? THEN ? ELSE checks_proposer_id END,
+       checks_proposer_name=CASE WHEN ? THEN ? ELSE checks_proposer_name END,
+       checks_seconder_id=CASE WHEN ? THEN NULL ELSE checks_seconder_id END,
+       checks_seconder_name=CASE WHEN ? THEN NULL ELSE checks_seconder_name END,
+       status='open',record_message_id=NULL,updated_at=? WHERE idea_id=? AND revision=? AND status='open' AND (SELECT status FROM ideas WHERE id=?)!='resolved'`,
     ).bind(
       JSON.stringify(draft),
       contentOf(idea),
+      Number(scoresChanged),
+      Number(checksChanged),
+      Number(checksChanged),
+      draft.issues.length ? actor.id : null,
+      Number(checksChanged),
+      draft.issues.length ? actor.name : null,
+      Number(checksChanged),
+      Number(checksChanged),
       now(),
       r.idea_id,
       r.revision,
@@ -121,19 +151,19 @@ export async function agreeReview(
   actor: Reviewer,
 ): Promise<void> {
   validateDraft(JSON.parse(r.draft));
-  if (!draftResult(JSON.parse(r.draft)).ready)
+  if (draftResult(JSON.parse(r.draft)).total === null)
     throw Error(
-      "Complete the scores or explain the selected issues before agreeing.",
+      "Complete all three scores before agreeing to the final scores.",
     );
   const res = await env.DB.batch([
     env.DB.prepare(
-      `INSERT OR IGNORE INTO council_review_agreements(idea_id,revision,actor_id,actor_name,at)
-      SELECT idea_id,revision,?,?,? FROM council_reviews WHERE idea_id=? AND revision=? AND status='open' AND ${liveContentSql()} AND (SELECT status FROM ideas WHERE id=?)!='resolved'`,
+      `INSERT OR IGNORE INTO council_score_agreements(idea_id,score_revision,actor_id,actor_name,at)
+      SELECT idea_id,score_revision,?,?,? FROM council_reviews WHERE idea_id=? AND revision=? AND status='open' AND ${liveContentSql()} AND (SELECT status FROM ideas WHERE id=?)!='resolved'`,
     ).bind(actor.id, actor.name, now(), r.idea_id, r.revision, r.idea_id),
     env.DB.prepare(
       `INSERT INTO council_review_events(idea_id,revision,action,actor_id,actor_name,snapshot,reason,at)
-      SELECT r.idea_id,r.revision,'agree',?,?,r.draft,'',? FROM council_reviews r
-      WHERE r.idea_id=? AND r.revision=? AND r.status='open' AND changes()=1 AND EXISTS(SELECT 1 FROM council_review_agreements a WHERE a.idea_id=r.idea_id AND a.revision=r.revision AND a.actor_id=?)`,
+      SELECT r.idea_id,r.revision,'agree_scores',?,?,r.draft,'',? FROM council_reviews r
+      WHERE r.idea_id=? AND r.revision=? AND r.status='open' AND changes()=1 AND EXISTS(SELECT 1 FROM council_score_agreements a WHERE a.idea_id=r.idea_id AND a.score_revision=r.score_revision AND a.actor_id=?)`,
     ).bind(actor.id, actor.name, now(), r.idea_id, r.revision, actor.id),
   ]);
   if (!res[0].meta.changes)
@@ -146,33 +176,87 @@ export async function withdrawAgreement(
 ): Promise<void> {
   const res = await env.DB.batch([
     env.DB.prepare(
-      `DELETE FROM council_review_agreements WHERE idea_id=? AND revision=? AND actor_id=? AND EXISTS(SELECT 1 FROM council_reviews WHERE idea_id=? AND revision=? AND status='open')`,
-    ).bind(r.idea_id, r.revision, actor.id, r.idea_id, r.revision),
-    event(env, r, "withdraw", actor, ""),
+      `DELETE FROM council_score_agreements WHERE idea_id=? AND score_revision=? AND actor_id=? AND EXISTS(SELECT 1 FROM council_reviews WHERE idea_id=? AND revision=? AND status='open')`,
+    ).bind(r.idea_id, r.score_revision, actor.id, r.idea_id, r.revision),
+    event(env, r, "withdraw_scores", actor, ""),
   ]);
   if (!res[0].meta.changes)
     throw Error("No current agreement to withdraw, or assessment closed.");
+}
+export async function secondChecks(
+  env: Env,
+  r: SharedReview,
+  actor: Reviewer,
+): Promise<void> {
+  const draft: ReviewDraft = JSON.parse(r.draft);
+  if (!draft.issues.length)
+    throw Error("No checks selected; they pass by default.");
+  const res = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE council_reviews SET checks_seconder_id=?,checks_seconder_name=?,updated_at=?
+      WHERE idea_id=? AND revision=? AND status='open' AND checks_proposer_id IS NOT NULL
+      AND checks_proposer_id!=? AND checks_seconder_id IS NULL AND ${liveContentSql()}
+      AND (SELECT status FROM ideas WHERE id=?)!='resolved'`,
+    ).bind(
+      actor.id,
+      actor.name,
+      now(),
+      r.idea_id,
+      r.revision,
+      actor.id,
+      r.idea_id,
+    ),
+    event(
+      env,
+      r,
+      "second_checks",
+      actor,
+      "Seconded all selected checks and their explanation",
+    ),
+  ]);
+  if (!res[0].meta.changes)
+    throw Error(
+      "A different member must second the current checks. They may already be seconded or have changed.",
+    );
+}
+export async function withdrawChecksSecond(
+  env: Env,
+  r: SharedReview,
+  actor: Reviewer,
+): Promise<void> {
+  const res = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE council_reviews SET checks_seconder_id=NULL,checks_seconder_name=NULL,updated_at=?
+      WHERE idea_id=? AND revision=? AND status='open' AND checks_seconder_id=?`,
+    ).bind(now(), r.idea_id, r.revision, actor.id),
+    event(env, r, "withdraw_checks_second", actor, ""),
+  ]);
+  if (!res[0].meta.changes)
+    throw Error(
+      "You have no current second to withdraw, or the assessment is closed.",
+    );
 }
 export async function reservePublish(env: Env, r: SharedReview): Promise<void> {
   validateDraft(JSON.parse(r.draft));
   if (!draftResult(JSON.parse(r.draft)).ready)
     throw Error("Assessment incomplete.");
   const res = await env.DB.prepare(
-    `UPDATE council_reviews SET status='publishing',updated_at=? WHERE idea_id=? AND revision=? AND status IN ('open','publishing') AND ${liveContentSql()} AND (SELECT status FROM ideas WHERE id=?)!='resolved' AND (SELECT COUNT(*) FROM council_review_agreements WHERE idea_id=? AND revision=?)>=?`,
+    `UPDATE council_reviews SET status='publishing',updated_at=?
+    WHERE idea_id=? AND revision=? AND status IN ('open','publishing') AND ${liveContentSql()}
+    AND (SELECT status FROM ideas WHERE id=?)!='resolved'
+    AND (
+      (json_array_length(json_extract(draft,'$.issues'))>0 AND checks_proposer_id IS NOT NULL
+       AND checks_seconder_id IS NOT NULL AND checks_proposer_id!=checks_seconder_id)
+      OR (json_array_length(json_extract(draft,'$.issues'))=0
+       AND (SELECT COUNT(*) FROM council_score_agreements WHERE idea_id=council_reviews.idea_id
+         AND score_revision=council_reviews.score_revision)>=?)
+    )`,
   )
-    .bind(
-      now(),
-      r.idea_id,
-      r.revision,
-      r.idea_id,
-      r.idea_id,
-      r.revision,
-      AGREEMENTS_REQUIRED,
-    )
+    .bind(now(), r.idea_id, r.revision, r.idea_id, AGREEMENTS_REQUIRED)
     .run();
   if (!res.meta.changes)
     throw Error(
-      "Three current agreements are required. The idea may have changed or already be closed.",
+      "Selected checks need a second; final scores need three agreements. Refresh if the idea or assessment changed.",
     );
 }
 export async function finishPublish(

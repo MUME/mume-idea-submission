@@ -9,6 +9,8 @@ import {
   draftResult,
   feedbackFor,
   AGREEMENTS_REQUIRED,
+  checksAgreed,
+  readyToClose,
 } from "../lib/sharedReview";
 import type { ReviewDraft, Reviewer } from "../lib/sharedReview";
 import {
@@ -19,6 +21,8 @@ import {
   withdrawAgreement,
   reservePublish,
   finishPublish,
+  secondChecks,
+  withdrawChecksSecond,
 } from "../lib/sharedReviewDb";
 import type { SharedReview } from "../lib/sharedReviewDb";
 import { discordFetch, discordJson } from "./rest";
@@ -105,7 +109,21 @@ export async function reviewPayload(env: Env, idea: IdeaRow, r: SharedReview) {
     inline: false,
   });
   fields.push({
-    name: "Whole-assessment agreement",
+    name: "Selected checks — one second",
+    value: !draft.issues.length
+      ? "Pass by default; no second needed."
+      : stale
+        ? "Idea changed — re-assess the checks."
+        : r.checks_proposer_id
+          ? `Selected by ${escape(r.checks_proposer_name || "Council")}` +
+            (checksAgreed(draft, r.checks_proposer_id, r.checks_seconder_id)
+              ? ` · Seconded by ${escape(r.checks_seconder_name || "Council")}`
+              : " · Awaiting a second")
+          : "Imported draft — propose the complete selection before another member seconds it.",
+    inline: false,
+  });
+  fields.push({
+    name: "Final-score agreement",
     value: stale
       ? "The idea changed. Revise this draft to assess the updated idea; old agreements no longer count."
       : `${votes.length}/${AGREEMENTS_REQUIRED} Council members${votes.length ? "\n" + votes.map((a) => escape(a.name)).join(", ") : ""}`,
@@ -133,7 +151,7 @@ export async function reviewPayload(env: Env, idea: IdeaRow, r: SharedReview) {
     embeds: [
       {
         title: `Council assessment · Idea #${idea.id}`,
-        description: `**${escape(idea.title)}**\n${status}\nRevision ${r.revision} · ${closed ? "Final" : "Draft"}\nEach agreement covers the scores, selected issues and final feedback together. Refresh to see other reviewers’ changes.`,
+        description: `**${escape(idea.title)}**\n${status}\nRevision ${r.revision} · ${closed ? "Final" : "Draft"}\nSelected checks need one second as a group. Final scores need three agreements. Refresh to see other reviewers’ changes.`,
         color: result.flags.length ? 0xd39a31 : 0x5865f2,
         fields,
       },
@@ -174,16 +192,33 @@ export async function reviewPayload(env: Env, idea: IdeaRow, r: SharedReview) {
         type: 1,
         components: [
           button(
-            "Agree with assessment",
-            cid("agree"),
+            "Second",
+            cid("secondchecks"),
             1,
-            closed || busy || stale || !result.ready,
+            closed ||
+              busy ||
+              stale ||
+              !draft.issues.length ||
+              !r.checks_proposer_id ||
+              !!r.checks_seconder_id,
           ),
           button(
-            "Withdraw my agreement",
+            "Agree with final scores",
+            cid("agree"),
+            1,
+            closed || busy || stale || result.total === null,
+          ),
+          button(
+            "Withdraw score agreement",
             cid("withdraw"),
             2,
             closed || busy || stale,
+          ),
+          button(
+            "Withdraw my second",
+            cid("withdrawchecks"),
+            2,
+            closed || busy || stale || !r.checks_seconder_id,
           ),
           button(
             busy ? "Retry internal recording" : "Close and record internally",
@@ -191,8 +226,12 @@ export async function reviewPayload(env: Env, idea: IdeaRow, r: SharedReview) {
             1,
             closed ||
               stale ||
-              !result.ready ||
-              votes.length < AGREEMENTS_REQUIRED,
+              !readyToClose(
+                draft,
+                votes.length,
+                r.checks_proposer_id,
+                r.checks_seconder_id,
+              ),
           ),
         ],
       },
@@ -423,6 +462,10 @@ export async function handleReviewInteraction(
           await editReview(env, r, idea, d, actor, values.reason ?? "");
         } else if (op === "agree" && i.type === 3)
           await agreeReview(env, r, actor);
+        else if (op === "secondchecks" && i.type === 3)
+          await secondChecks(env, r, actor);
+        else if (op === "withdrawchecks" && i.type === 3)
+          await withdrawChecksSecond(env, r, actor);
         else if (op === "withdraw" && i.type === 3)
           await withdrawAgreement(env, r, actor);
         else if (op === "publish" && i.type === 3)
@@ -488,8 +531,14 @@ async function reopen(
   // Reopening is an explicit change, not an accidental edit of a final result.
   const result = await env.DB.batch([
     env.DB.prepare(
-      `UPDATE council_reviews SET status='open',revision=revision+1,idea_content=?,record_message_id=NULL WHERE idea_id=? AND revision=? AND status='published'`,
-    ).bind(contentOf(idea), idea.id, r.revision),
+      `UPDATE council_reviews SET status='open',revision=revision+1,score_revision=score_revision+1,checks_revision=checks_revision+1,checks_seconder_id=NULL,checks_seconder_name=NULL,checks_proposer_id=?,checks_proposer_name=?,idea_content=?,record_message_id=NULL WHERE idea_id=? AND revision=? AND status='published'`,
+    ).bind(
+      JSON.parse(r.draft).issues.length ? actor.id : null,
+      JSON.parse(r.draft).issues.length ? actor.name : null,
+      contentOf(idea),
+      idea.id,
+      r.revision,
+    ),
     env.DB.prepare(
       `INSERT INTO council_review_events(idea_id,revision,action,actor_id,actor_name,snapshot,reason,at) SELECT idea_id,revision,'reopen',?,?,draft,'Reopened for discussion',? FROM council_reviews WHERE idea_id=? AND revision=? AND changes()=1`,
     ).bind(

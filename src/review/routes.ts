@@ -11,7 +11,7 @@ export async function handleReviewPage(
       new URL(request.url).pathname + new URL(request.url).search,
     );
   return new Response(
-    '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Council review moved</title><body><h1>Review this idea in Discord</h1><p>Use Assess idea on its private review post. Scores are now fluid, with three Council members agreeing to the whole assessment before publication.</p></body></html>',
+    '<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Council review moved</title><body><h1>Review this idea in Discord</h1><p>Use Assess idea on its private review post. Scores are now fluid, with one second on selected checks and three Council members agreeing to the final scores before recording the result internally.</p></body></html>',
     {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
