@@ -6,6 +6,7 @@ import { EPHEMERAL, InteractionResponseType as IRT, KV, STATUS_LABEL } from "../
 import { allFields, loadConfigVersion, loadLiveConfig } from "../lib/config";
 import { attachReview, deleteIdea, getIdea, logStatus, updateIdeaAnswers, updateStatus } from "../lib/db";
 import { decideTransition } from "../lib/transitions";
+import { canMarkReviewed } from "../lib/sharedReviewDb";
 import { holdsCouncil } from "../lib/council";
 import { ideaToWordDoc } from "../lib/worddoc";
 import { validateAnswers } from "../lib/validate";
@@ -278,6 +279,11 @@ async function handleStatusChange(env: Env, ctx: ExecutionContext, interaction: 
     return ephemeral(decision.reason);
   }
 
+  if (target === "approved" && !(await canMarkReviewed(env, idea))) {
+    ctx.waitUntil(resetSelect(env, interaction, idea).catch((e) => console.error("reset failed", e)));
+    return ephemeral("Before marking this idea Reviewed, three Council members must agree to its current final scores.");
+  }
+
   // Deferred update; do the work after acking (spec §9.5).
   ctx.waitUntil(applyTransition(env, interaction, idea, target, actorId, displayName(member)));
   return json({ type: IRT.DEFERRED_UPDATE_MESSAGE });
@@ -368,6 +374,11 @@ async function applyTransition(
     }
   } catch (err) {
     console.error(`transition ${idea.id} ${from}->${target} failed`, err);
+    await discordFetch(env, `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}`, {
+      method: "POST", unauthenticated: true,
+      body: { content: (err as Error).message || "The status change failed. Refresh and try again.", flags: EPHEMERAL, allowed_mentions: { parse: [] } },
+    }).catch(() => {});
+    await resetSelect(env, interaction, idea).catch(() => {});
   }
 }
 

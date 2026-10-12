@@ -19,6 +19,7 @@ import {
   finishPublish,
   secondChecks,
   withdrawChecksSecond,
+  canMarkReviewed,
 } from "../src/lib/sharedReviewDb.ts";
 import { updateIdeaAnswers, updateStatus } from "../src/lib/db.ts";
 import {
@@ -565,6 +566,66 @@ test("selected checks can be recorded with one second, without voting on unfinis
     await finishPublish(env, r, "internal-record", B);
     r = await getReview(env, idea);
     assert.equal(r.status, "published");
+  } finally {
+    await mf.dispose();
+  }
+});
+test("Reviewed status is blocked until three members agree to the current final scores", async () => {
+  const { mf, env, idea } = await fixture();
+  try {
+    assert.equal(await canMarkReviewed(env, idea), false);
+    await assert.rejects(
+      updateStatus(env, 1, "approved", 1),
+      /three Council members/,
+    );
+    let r = await getReview(env, idea),
+      d = complete();
+    await editReview(env, r, idea, d, A, "Initial scores");
+    r = await getReview(env, idea);
+    await agreeReview(env, r, A);
+    await agreeReview(env, r, B);
+    assert.equal(await canMarkReviewed(env, idea), false);
+    await assert.rejects(updateStatus(env, 1, "approved", 2));
+    await agreeReview(env, r, C);
+    assert.equal(await canMarkReviewed(env, idea), true);
+    // A withdrawal after a successful preflight must still block the actual write.
+    await withdrawAgreement(env, r, C);
+    await assert.rejects(updateStatus(env, 1, "approved", 3));
+    await agreeReview(env, r, C);
+    // A score change after preflight is also caught by the atomic SQL condition.
+    d.scores.interest = 5;
+    await editReview(env, r, idea, d, A, "More interest");
+    await assert.rejects(updateStatus(env, 1, "approved", 4));
+    r = await getReview(env, idea);
+    await agreeReview(env, r, A);
+    await agreeReview(env, r, B);
+    await agreeReview(env, r, C);
+    await updateIdeaAnswers(
+      env,
+      1,
+      "Rewritten",
+      { proposal: "new content" },
+      1,
+      5,
+    );
+    await assert.rejects(updateStatus(env, 1, "approved", 6));
+    const changed = {
+      ...idea,
+      title: "Rewritten",
+      answers: JSON.stringify({ proposal: "new content" }),
+    };
+    assert.equal(await canMarkReviewed(env, changed), false);
+    await editReview(env, r, changed, d, A, "Reassess new content");
+    r = await getReview(env, changed);
+    await agreeReview(env, r, A);
+    await agreeReview(env, r, B);
+    await agreeReview(env, r, C);
+    await updateStatus(env, 1, "approved", 7);
+    assert.equal(
+      (await env.DB.prepare("SELECT status FROM ideas WHERE id=1").first())
+        .status,
+      "approved",
+    );
   } finally {
     await mf.dispose();
   }

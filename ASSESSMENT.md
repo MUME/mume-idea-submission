@@ -42,7 +42,12 @@ the final scores.
 
 The existing In Proposal / Final Draft / Submitted / Reviewed / Resolved status
 workflow stays separate. Closing an assessment does not change the idea status.
-Status changes never bypass the assessment publication quorum. Reviewed exports
+**Marking an idea Reviewed is blocked until three Council members have agreed to
+its current complete scores.** The Discord dropdown explains why a premature
+attempt is rejected, and the database update checks the same condition atomically.
+A changed idea, revised scores or withdrawn agreement cannot bypass this gate.
+A checks second alone allows an internal return/defer record, but does not permit
+marking the idea Reviewed without the three final-score agreements. Reviewed exports
 still contain the original idea (not the assessment); the private Council thread holds the
 recorded assessment. There is no new Activity, OAuth setup or slash command.
 

@@ -272,3 +272,23 @@ export async function finishPublish(
     event(env, r, "publish", actor, messageId),
   ]);
 }
+
+// Friendly preflight for the Discord status selector. updateStatus repeats this
+// condition atomically so a concurrent edit/withdrawal cannot slip past it.
+export async function canMarkReviewed(
+  env: Env,
+  idea: IdeaRow,
+): Promise<boolean> {
+  const r = await env.DB.prepare(
+    "SELECT * FROM council_reviews WHERE idea_id=?",
+  )
+    .bind(idea.id)
+    .first<SharedReview>();
+  if (!r || r.idea_content !== contentOf(idea)) return false;
+  const draft: ReviewDraft = JSON.parse(r.draft);
+  validateDraft(draft);
+  return (
+    draftResult(draft).total !== null &&
+    (await agreements(env, r)).length >= AGREEMENTS_REQUIRED
+  );
+}
