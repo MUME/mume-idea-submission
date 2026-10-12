@@ -1,101 +1,113 @@
-# Council idea review (assessment)
+# Council assessment in Discord
 
-An off-site, Council-only surface for scoring and triaging submitted ideas. It is
-built **into this same Worker and D1** (not a separate service), so it reads ideas
-directly and posts results back to Discord. It is the production version of the
-rubric prototype; the logic (gate checks, weighted scoring, two-person seconding)
-is kept, the surface is a proper web page rather than a Discord dialog.
+This replaces the per-item propose/second workflow from PR #1 with a fluid shared
+assessment and three agreements on its complete final wording.
 
-## What it does
+## Review flow
 
-For a submitted idea, the Council assesses it against a fixed rubric:
+1. In the private submitted-ideas forum, click **Assess idea**. A Council-only,
+   ephemeral panel opens inside Discord. Every reviewer reads/edits the same draft
+   stored in D1; panels are personal snapshots, so use **Refresh** to see others'
+   changes. The interface stacks native Discord embeds, a select menu and buttons.
+2. **Issues requiring action** is a multi-select dropdown. Select any applicable
+   issues, then explain them in the modal. Nothing selected means the checks pass
+   by default. Removing issues also requires a reason. There are no per-item seconds.
+3. **Adjust scores / feedback** opens a five-field Discord form: the three scores
+   (enter `4 | reason`, for example), final internal Council note / response guidance, and why you are revising
+   the assessment. Each score is 1–5; blank means unassessed. Feasibility counts twice
+   and measures effort only. With no issues, all three scores are required before
+   agreement. With issues, explained return/defer feedback can be agreed without
+   finishing numeric scores. No-change submissions do not invalidate agreements.
+4. Each Council member explicitly clicks **Agree with assessment** on the version
+   they reviewed. The editor is allowed to agree, but editing does not count as
+   agreement. Three distinct Discord IDs are required, not three clicks. Members
+   can withdraw their own agreement before internal recording.
+5. Any change to a score, explanation, selected issues or final feedback increments
+   the whole-assessment revision. Previous agreements remain in history but no
+   longer count. Concurrent stale edits and agreements are rejected. Editing the
+   underlying idea also makes the assessment stale; revise it against the updated
+   idea before new agreements or internal recording.
+6. **Preview internal summary** shows the exact internal summary inside Discord. After three
+   agreements, **Close and record internally** posts it only to the private Council review thread and freezes
+   the assessment. Issues override the numerical recommendation. Internal recording is
+   explicit; nothing is automatically posted at the third agreement.
+7. **Reopen assessment** explicitly starts a new revision for further discussion,
+   requiring three new agreements. A Resolved idea must itself be reopened first.
 
-- **Six gate checks** (clarity, evidence, split, already-exists, duplicate,
-  dependency). A seconded **yes** on any check returns the idea to the author with
-  standard guidance and sets the score aside.
-- **Three scores**: Usefulness (×1), Feasibility (×2, effort only), Interest (×1),
-  giving a total of 4–20 mapped to five recommendation bands.
-- **Propose then second**: every check and score is proposed by one Council member
-  and must be seconded by a **different** one. Revising clears the second.
-- A live **Author feedback** card builds the message that will go to the author.
-  Nothing reaches Discord until a Council member clicks **Publish**.
+The existing In Proposal / Final Draft / Submitted / Reviewed / Resolved status
+workflow stays separate. Closing an assessment does not change the idea status.
+Status changes never bypass the assessment publication quorum. Reviewed exports
+still contain the original idea (not the assessment); the private Council thread holds the
+recorded assessment. There is no new Activity, OAuth setup or slash command.
 
-The rubric is the single source of truth in [`src/lib/rubric.ts`](src/lib/rubric.ts)
-and all authority is enforced server-side — the client only renders. `RUBRIC_VERSION`
-is stamped on each assessment so results stay readable if the rubric changes.
+A Council member uses this internal assessment as the basis for a separately written
+response. This feature never posts ratings, reviewer agreements or assessment notes
+to the public board, the author, or reviewed exports.
 
-## Reviewer flow
+## Storage and safeguards
 
-1. An idea reaches **Submitted**; the bot mirrors a private review copy (existing
-   behaviour). That copy now carries an **"Assess idea"** link button.
-2. The button opens `/{PUBLIC_BASE_URL}/admin/review?idea=N`. First visit signs the
-   reviewer in with Discord (same White-Council login as the admin CMS) and returns
-   to the page.
-3. Reviewers propose and second each check and score. The result resolves live.
-4. **Publish** posts the agreed feedback to the idea's review thread. It does **not**
-   change the idea's status — the Council still does that with the existing status
-   dropdown (deliberate; outcomes are presented, not auto-applied).
+Migration `0004_shared_council_review.sql` adds shared drafts, revision-scoped
+agreements and full-snapshot event history. Acknowledged Discord IDs and role lists
+are checked server-side for each interaction. Read or write controls must originate
+in the idea's private review thread. Native mutation requests are acknowledged
+before database/Discord operations; opening a modal uses an immediate response.
 
-## Architecture
+Revision updates use compare-and-swap SQL, with mutation and event logging in one
+D1 batch. Agreements are unique per idea, revision and actor. Events preserve the
+whole draft, actor, reason and timestamp. An idea-content fingerprint prevents
+publishing an assessment of old content. During reserved publication, content and
+status edits are blocked until delivery is completed; use Retry internal recording if a
+network failure left it reserved.
 
-| Piece | File |
-|---|---|
-| Rubric + result (pure, tested) | `src/lib/rubric.ts` |
-| Persistence + mutation rules | `src/lib/assess.ts` |
-| API + page handlers | `src/review/routes.ts` |
-| The SPA | `src/review/page.ts` |
-| Schema | `migrations/0003_assessments.sql` |
-| "Assess idea" button on review copies | `src/discord/forum.ts` |
-| Reviewer name in the session | `src/admin/{session,routes}.ts` |
-| Engine tests | `test/logic.test.mjs` |
+Publication uses a stable nonce and a durable message marker, scanning that thread
+for a prior bot-authored result before retrying. This avoids reposting feedback if
+Discord succeeded but database finalisation failed. The draft remains locked during
+such failures. A maintainer can recover a persistently failed reserved publication
+by fixing Discord permissions and retrying; do not reset it before checking for an
+already-delivered message. Mentions in assessment output are suppressed.
 
-**Auth**: reuses the admin Discord OAuth. The review area lives under `/admin`, so
-the existing `/admin/callback` redirect (already registered in the Discord portal)
-covers it — **no new portal step and no new secrets**. The session now also carries
-the reviewer's display name, for attributing proposals and seconds.
+Existing PR #1 tables/history are retained. On first native access, existing values
+are imported into an **unagreed draft**; old per-item seconds never count as the new
+three-person agreement. The previous web review page explains where reviewing moved,
+and its mutation API returns 410 so it cannot publish via the obsolete rules.
 
-**Routes**:
-- `GET /admin/review?idea=N` — the page (login-gated).
-- `GET /admin/api/assess/:id` — idea + rubric + current assessment + result.
-- `POST /admin/api/assess/:id/propose` — `{item_id, value, reason}`.
-- `POST /admin/api/assess/:id/second` — `{item_id, revision}`.
-- `POST /admin/api/assess/:id/publish` — `{note}`; posts to the review thread.
+## Deploy and refresh
 
-**Tables** (migration 0003): `assessments` (one per idea), `assessment_items`
-(one current proposal per item, with proposer/seconder/revision), `assessment_log`
-(append-only history). Derived totals and bands are never stored; they are computed
-from the agreed items on every read.
-
-**Integrity**: proposer and seconder must be distinct Discord IDs; a second carries
-the revision it saw and is rejected if the wording changed since; validation and the
-outcome are server-side only.
-
-## Deploy (not done automatically)
-
-Publishing to the live bot is a manual step on the White Council Cloudflare account.
-Before running, confirm the account:
-
-```bash
-npx wrangler whoami   # expect themumewhitecouncil@gmail.com (4b7c51dd…)
-```
-
-Then apply the migration and deploy:
+First test this branch in staging with three real Council identities. Staging's
+`everyone` Council sentinel is only for its test guild. Use a modern Node release
+(Node 22.13+; Node 24 recommended) for tests that exercise production SQL through
+Node's SQLite API. No runtime dependencies were added.
 
 ```bash
-npx wrangler d1 migrations apply mume_ideas --remote   # adds the 3 assessment tables
-npm run deploy
+npm ci
+npm run typecheck
+npm test
+npm run build:client
+npx wrangler deploy --dry-run
 ```
 
-After deploy, the "Assess idea" button appears on review copies the next time each
-one is rendered (any status change refreshes it; existing copies can be nudged by a
-status change, or re-mirrored on the next submit).
+After review, the maintainer verifies the correct Cloudflare account, applies
+migration 0004 and deploys to staging, then production. Existing configured roles
+and permissions should suffice; the bot needs Send Messages, Embed Links, Manage
+Threads and Read Message History in the relevant forums. No new Discord portal
+configuration or command registration is needed.
 
-No new secrets. Staging: the same two commands with the `:staging` / `--env staging`
-variants (see `STAGING.md`), on the staging Cloudflare account.
+Refresh existing private posts with the dry-run-first helper (this does not touch
+public messages or reactions):
 
-## Not in this version (by design, agreed)
+```bash
+node scripts/backfill-native-review.mjs
+node scripts/backfill-native-review.mjs --apply
+```
 
-- Publishing does **not** change the idea's status; the Council selects the outcome.
-- No automatic return/reopen wiring; the gate-check actions are shown as guidance.
-- One assessment per idea; reopening/revising the whole assessment after publish is
-  a later addition if wanted.
+Staging uses `MUME_ENV_FILE=.dev.vars.staging` and `--staging`. This PR does not deploy
+or execute the backfill. The native assessment button is also retained by content
+and status refresh paths, so future edits do not remove it.
+
+## Validation
+
+Tests cover all 125 new-rubric score combinations, no-issue defaults, flag precedence,
+input validation, three distinct agreements, repeated votes, withdrawals, stale
+revisions/content, frozen publication, full event snapshots, and native role/guild
+checks. SQLite tests execute the production D1 SQL through a transactional adapter;
+real Discord interaction and deployed D1 acceptance are part of staging verification.

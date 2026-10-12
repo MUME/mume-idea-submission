@@ -1,17 +1,17 @@
 // Forum channel operations (build spec §8, §9, §10).
 
 import type { Env, FormConfig, IdeaRow, Status } from "../types";
+import { reviewButton } from "./review";
 import { DISCORD_API, KV, STATUSES, TAG_NAME, VOTE_EMOJIS } from "../constants";
 import { DiscordRestError, discordFetch, discordJson } from "./rest";
 import { buildEmbed, buildIdeaComponents, ideaThreadName } from "./embed";
 
 const AUTO_ARCHIVE = 10080; // 7 days, the max
 
-// Append a link button that opens the off-site Council review page for this idea.
+// Open the native Council assessment from its private review copy.
 // Only added to the private review copies, never the public post.
-function withAssessButton(env: Env, ideaId: number, components: Record<string, unknown>[]): Record<string, unknown>[] {
-  const url = `${env.PUBLIC_BASE_URL}/admin/review?idea=${ideaId}`;
-  return [...components, { type: 1, components: [{ type: 2, style: 5, label: "Assess idea", url }] }];
+function withAssessButton(_env: Env, ideaId: number, components: Record<string, unknown>[]): Record<string, unknown>[] {
+  return [...components, reviewButton(ideaId)];
 }
 
 interface ForumTag {

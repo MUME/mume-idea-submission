@@ -8,6 +8,13 @@ See [`../idea-board-build-spec.md`](../idea-board-build-spec.md) for the full sp
 > config-only — new secrets, re-point the Activity URL mapping + Entry Point command
 > in the dev portal, recreate the forum tags/permissions. No code changes.
 
+## Council assessment
+
+See [ASSESSMENT.md](ASSESSMENT.md) for the native Discord review flow: shared,
+editable rubric scores, optional issue flags, and three distinct Council members
+agreeing to the complete revision before the assessment is recorded privately. No separate review
+website or new Discord command is needed. Tests require Node 22.13+ (24 recommended).
+
 ## What it does
 
 - Serves the two-page submission form as an Activity (`GET /`), identity via the

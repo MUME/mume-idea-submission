@@ -60,9 +60,10 @@ export async function updateIdeaAnswers(
   schemaVersion: number,
   now: number,
 ): Promise<void> {
-  await env.DB.prepare("UPDATE ideas SET title = ?, answers = ?, schema_version = ?, updated_at = ? WHERE id = ?")
+  const result = await env.DB.prepare("UPDATE ideas SET title = ?, answers = ?, schema_version = ?, updated_at = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM council_reviews WHERE idea_id=ideas.id AND status='publishing')")
     .bind(title, JSON.stringify(answers), schemaVersion, now, ideaId)
     .run();
+  if (!result.meta.changes) throw new Error("An assessment is being published. Retry the edit after publication completes.");
 }
 
 // Record the mirrored review-forum copy created when an idea is Submitted.
@@ -79,9 +80,10 @@ export async function attachReview(
 }
 
 export async function updateStatus(env: Env, ideaId: number, status: Status, now: number): Promise<void> {
-  await env.DB.prepare("UPDATE ideas SET status = ?, updated_at = ? WHERE id = ?")
+  const result = await env.DB.prepare("UPDATE ideas SET status = ?, updated_at = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM council_reviews WHERE idea_id=ideas.id AND status='publishing')")
     .bind(status, now, ideaId)
     .run();
+  if (!result.meta.changes) throw new Error("An assessment is being published. Retry the status change after publication completes.");
 }
 
 export async function logStatus(
