@@ -11,6 +11,55 @@ import { validateAnswers } from "../src/lib/validate.ts";
 import { mintSession, verifySession } from "../src/lib/session.ts";
 import { assertValidConfig } from "../src/lib/config.ts";
 import { answerText, truncate } from "../src/discord/embed.ts";
+import { computeResult, CRITERIA, CHECKS, BANDS, isValidValue } from "../src/lib/rubric.ts";
+
+// Helper: build an assignments map, everything seconded by default.
+function agree(values) {
+  const a = {};
+  for (const [id, value] of Object.entries(values)) {
+    a[id] = { value, reason: "x", proposerId: "A", proposerName: "A", seconderId: "B", seconderName: "B", revision: 1 };
+  }
+  return a;
+}
+
+test("rubric: 125 score combinations give the weighted total and correct band", () => {
+  for (let u = 1; u <= 5; u++)
+    for (let f = 1; f <= 5; f++)
+      for (let i = 1; i <= 5; i++) {
+        const a = agree({ clarity: 0, evidence: 0, split: 0, exists: 0, duplicate: 0, dependency: 0, usefulness: u, feasibility: f, interest: i });
+        const r = computeResult(a);
+        assert.equal(r.status, "Assessment agreed");
+        assert.equal(r.total, u + 2 * f + i);
+        const expected = r.total <= 7 ? "Low priority" : r.total <= 10 ? "Worth retaining" : r.total <= 13 ? "Worth considering" : r.total <= 16 ? "Recommended" : "Strongly recommended";
+        assert.equal(r.band.name, expected);
+      }
+});
+
+test("rubric: a seconded yes-check suppresses the score and returns the idea", () => {
+  const a = agree({ clarity: 1, evidence: 0, split: 0, exists: 0, duplicate: 0, dependency: 0, usefulness: 5, feasibility: 5, interest: 5 });
+  const r = computeResult(a);
+  assert.equal(r.status, "Further action required");
+  assert.equal(r.total, null);
+  assert.equal(r.flags.length, 1);
+  assert.equal(r.flags[0].id, "clarity");
+});
+
+test("rubric: an unseconded item keeps the result pending", () => {
+  const a = agree({ clarity: 0, evidence: 0, split: 0, exists: 0, duplicate: 0, dependency: 0, usefulness: 3, feasibility: 3 });
+  // interest never assessed
+  const r = computeResult(a);
+  assert.equal(r.status, "Assessment in progress");
+  assert.equal(r.total, null);
+  assert.ok(r.pendingIds.includes("interest"));
+});
+
+test("rubric: value validation (criteria 1-5, checks 0/1)", () => {
+  assert.equal(isValidValue("usefulness", 0), false);
+  assert.equal(isValidValue("usefulness", 5), true);
+  assert.equal(isValidValue("clarity", 1), true);
+  assert.equal(isValidValue("clarity", 2), false);
+  assert.equal(isValidValue("nope", 1), false);
+});
 
 // cwd is the project root under `npm test` (paths survive the esbuild bundle move).
 const config = JSON.parse(readFileSync(join(process.cwd(), "seed/form-config.v1.json"), "utf8"));

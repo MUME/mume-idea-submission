@@ -1,6 +1,7 @@
 // D1 access for ideas and status history.
 
 import type { Answers, Env, IdeaRow, Status } from "../types";
+import { AGREEMENTS_REQUIRED } from "./sharedReview";
 
 export async function getIdea(env: Env, id: number): Promise<IdeaRow | null> {
   const row = await env.DB.prepare("SELECT * FROM ideas WHERE id = ?").bind(id).first<IdeaRow>();
@@ -60,9 +61,10 @@ export async function updateIdeaAnswers(
   schemaVersion: number,
   now: number,
 ): Promise<void> {
-  await env.DB.prepare("UPDATE ideas SET title = ?, answers = ?, schema_version = ?, updated_at = ? WHERE id = ?")
+  const result = await env.DB.prepare("UPDATE ideas SET title = ?, answers = ?, schema_version = ?, updated_at = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM council_reviews WHERE idea_id=ideas.id AND status='publishing')")
     .bind(title, JSON.stringify(answers), schemaVersion, now, ideaId)
     .run();
+  if (!result.meta.changes) throw new Error("An assessment is being published. Retry the edit after publication completes.");
 }
 
 // Record the mirrored review-forum copy created when an idea is Submitted.
@@ -78,10 +80,38 @@ export async function attachReview(
     .run();
 }
 
-export async function updateStatus(env: Env, ideaId: number, status: Status, now: number): Promise<void> {
-  await env.DB.prepare("UPDATE ideas SET status = ?, updated_at = ? WHERE id = ?")
-    .bind(status, now, ideaId)
+export async function updateStatus(
+  env: Env,
+  ideaId: number,
+  status: Status,
+  now: number,
+): Promise<void> {
+  // Guard Reviewed at the write itself, not just the UI: approvals must match the
+  // current score revision and the current idea content at the moment of update.
+  const result = await env.DB.prepare(
+    `UPDATE ideas SET status=?,updated_at=? WHERE id=?
+    AND NOT EXISTS(SELECT 1 FROM council_reviews WHERE idea_id=ideas.id AND status='publishing')
+    AND (?!='approved' OR EXISTS (
+      SELECT 1 FROM council_reviews r WHERE r.idea_id=ideas.id
+      AND r.idea_content=json_array(ideas.title,ideas.answers,ideas.schema_version)
+      AND json_type(r.draft,'$.scores.usefulness')='integer'
+      AND json_extract(r.draft,'$.scores.usefulness') BETWEEN 1 AND 5
+      AND json_type(r.draft,'$.scores.feasibility')='integer'
+      AND json_extract(r.draft,'$.scores.feasibility') BETWEEN 1 AND 5
+      AND json_type(r.draft,'$.scores.interest')='integer'
+      AND json_extract(r.draft,'$.scores.interest') BETWEEN 1 AND 5
+      AND (SELECT COUNT(*) FROM council_score_agreements a WHERE a.idea_id=r.idea_id
+        AND a.score_revision=r.score_revision)>=?
+    ))`,
+  )
+    .bind(status, now, ideaId, status, AGREEMENTS_REQUIRED)
     .run();
+  if (!result.meta.changes)
+    throw new Error(
+      status === "approved"
+        ? "Reviewed requires three Council members to agree to the current final scores. Refresh after any changes."
+        : "An assessment is being recorded. Retry the status change after recording completes.",
+    );
 }
 
 export async function logStatus(

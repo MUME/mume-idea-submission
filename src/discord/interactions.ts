@@ -1,10 +1,12 @@
 // Interaction dispatch (build spec §7) and the status state machine (§9).
 
 import type { Env, FormConfig, IdeaRow, Status } from "../types";
+import { handleReviewInteraction, reviewButton } from "./review";
 import { EPHEMERAL, InteractionResponseType as IRT, KV, STATUS_LABEL } from "../constants";
 import { allFields, loadConfigVersion, loadLiveConfig } from "../lib/config";
 import { attachReview, deleteIdea, getIdea, logStatus, updateIdeaAnswers, updateStatus } from "../lib/db";
 import { decideTransition } from "../lib/transitions";
+import { canMarkReviewed } from "../lib/sharedReviewDb";
 import { holdsCouncil } from "../lib/council";
 import { ideaToWordDoc } from "../lib/worddoc";
 import { validateAnswers } from "../lib/validate";
@@ -55,6 +57,9 @@ function ephemeral(content: string): Response {
 }
 
 export async function handleInteraction(env: Env, ctx: ExecutionContext, interaction: Interaction): Promise<Response> {
+  if ((interaction.type === 3 || interaction.type === 5) && interaction.data?.custom_id?.startsWith("review:")) {
+    return handleReviewInteraction(env, ctx, interaction);
+  }
   // PING
   if (interaction.type === 1) return json({ type: IRT.PONG });
 
@@ -274,6 +279,11 @@ async function handleStatusChange(env: Env, ctx: ExecutionContext, interaction: 
     return ephemeral(decision.reason);
   }
 
+  if (target === "approved" && !(await canMarkReviewed(env, idea))) {
+    ctx.waitUntil(resetSelect(env, interaction, idea).catch((e) => console.error("reset failed", e)));
+    return ephemeral("Before marking this idea Reviewed, three Council members must agree to its current final scores.");
+  }
+
   // Deferred update; do the work after acking (spec §9.5).
   ctx.waitUntil(applyTransition(env, interaction, idea, target, actorId, displayName(member)));
   return json({ type: IRT.DEFERRED_UPDATE_MESSAGE });
@@ -284,7 +294,12 @@ async function resetSelect(env: Env, interaction: Interaction, idea: IdeaRow): P
   if (!interaction.channel_id || !interaction.message) return;
   await discordFetch(env, `/channels/${interaction.channel_id}/messages/${interaction.message.id}`, {
     method: "PATCH",
-    body: { embeds: [buildEmbed(idea, config)], components: buildIdeaComponents(idea.id) },
+    body: {
+      embeds: [buildEmbed(idea, config)],
+      components: idea.review_thread_id && interaction.channel_id === idea.review_thread_id
+        ? [...buildIdeaComponents(idea.id), reviewButton(idea.id)]
+        : buildIdeaComponents(idea.id),
+    },
   });
 }
 
@@ -359,6 +374,11 @@ async function applyTransition(
     }
   } catch (err) {
     console.error(`transition ${idea.id} ${from}->${target} failed`, err);
+    await discordFetch(env, `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}`, {
+      method: "POST", unauthenticated: true,
+      body: { content: (err as Error).message || "The status change failed. Refresh and try again.", flags: EPHEMERAL, allowed_mentions: { parse: [] } },
+    }).catch(() => {});
+    await resetSelect(env, interaction, idea).catch(() => {});
   }
 }
 
@@ -375,7 +395,7 @@ async function renderIdeaEverywhere(
   const embed = buildEmbed(idea, config);
   const hasReview = !!idea.review_thread_id;
   const publicComponents = hasReview ? [] : buildIdeaComponents(idea.id);
-  const reviewComponents = buildIdeaComponents(idea.id);
+  const reviewComponents = [...buildIdeaComponents(idea.id), reviewButton(idea.id)];
   const clicked = interaction.message?.id;
   const clickedIsReview = !!idea.review_message_id && clicked === idea.review_message_id;
 

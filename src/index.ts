@@ -12,6 +12,7 @@ import { renderActivityPage } from "./activity/page";
 import { createIdeaPost, addVoteReaction, autoFollow, postCouncilPing } from "./discord/forum";
 import { attachThread, agingUnsubmittedIdeas, ideasMissingThread, logStatus } from "./lib/db";
 import { handleAdminRoot, handleAdminCallback, handleAdminLogout, currentAdmin } from "./admin/routes";
+import { handleReviewPage, handleReviewApi } from "./review/routes";
 import { handleExport } from "./admin/export";
 import appClientJs from "./generated/app.client.js";
 
@@ -138,6 +139,8 @@ export default {
       return handleExport(env, request);
     }
     if (pathname === "/admin/config") return handleAdminConfig(env, request);
+    if (pathname === "/admin/review" && method === "GET") return handleReviewPage(env, request);
+    if (pathname.startsWith("/admin/api/assess/")) return handleReviewApi(env, request);
     if (pathname === "/health") return handleHealth(env);
 
     return new Response("Not found", { status: 404 });
