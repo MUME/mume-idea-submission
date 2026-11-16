@@ -2366,3 +2366,88 @@ test("check summary text is retained for editors and proposers with explicit sav
     await mf.dispose();
   }
 });
+
+test("assessment-table failures do not prevent private-copy delivery or refresh", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch;
+  const prepare = env.DB.prepare;
+  const config = JSON.parse(readFileSync("seed/form-config.v1.json", "utf8"));
+  const { createReviewPost, refreshIdeaPost } = await import("../src/discord/forum.ts");
+  const calls = [];
+  env.SUBMITTED_CHANNEL_ID = "review-forum";
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return Response.json({ id: "copy", message: { id: "starter" } });
+  };
+  try {
+    env.DB.prepare = (sql) => {
+      if (sql.includes("council_review_changes")) throw Error("no such table: council_review_changes");
+      return prepare.call(env.DB, sql);
+    };
+    const copy = await createReviewPost(env, { ...idea, author_name: "Author" }, config);
+    assert.deepEqual(copy, { threadId: "copy", messageId: "starter" });
+    const post = calls.find((c) => c.url.endsWith("/channels/review-forum/threads")).body.message;
+    assert.ok(post.embeds.some((e) => e.title === "Assessment temporarily unavailable"));
+    assert.ok(!JSON.stringify(post).includes("Checks pass"));
+    assert.ok(post.components.some((r) => r.components?.some((c) => c.custom_id === "review:open:1:0")));
+    assert.equal(await canMarkReviewed(env, idea), false, "Presentation fallback cannot grant approval");
+    calls.length = 0;
+    await refreshIdeaPost(env, { ...idea, author_name: "Author", message_id: "public-starter", review_message_id: "starter" }, config);
+    const publicCard = calls.find((c) => c.url.endsWith("/channels/public/messages/public-starter")).body;
+    assert.equal(publicCard.embeds.length, 1);
+    assert.ok(!JSON.stringify(publicCard).includes("Assessment temporarily unavailable"));
+    const privateCard = calls.find((c) => c.url.endsWith("/channels/private/messages/starter")).body;
+    assert.ok(privateCard.embeds.some((e) => e.title === "Assessment temporarily unavailable"));
+  } finally { env.DB.prepare = prepare; globalThis.fetch = oldFetch; await mf.dispose(); }
+});
+
+test("an overloaded assessment read falls back without weakening strict approval reads", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch, prepare = env.DB.prepare;
+  const { createReviewPost } = await import("../src/discord/forum.ts");
+  env.SUBMITTED_CHANNEL_ID = "review-forum";
+  let delivered;
+  globalThis.fetch = async (_url, init) => { delivered = JSON.parse(init.body); return Response.json({ id: "copy" }); };
+  try {
+    env.DB.prepare = () => { throw Error("D1 overloaded"); };
+    await createReviewPost(env, { ...idea, author_name: "Author" }, JSON.parse(readFileSync("seed/form-config.v1.json", "utf8")));
+    assert.equal(delivered.message.embeds.at(-1).title, "Assessment temporarily unavailable");
+    await assert.rejects(canMarkReviewed(env, idea), /D1 overloaded/);
+  } finally { env.DB.prepare = prepare; globalThis.fetch = oldFetch; await mf.dispose(); }
+});
+
+test("an unavailable private Discord forum warns the submitting Council member and leaves the source unlocked", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch;
+  const { handleInteraction } = await import("../src/discord/interactions.ts");
+  const config = readFileSync("seed/form-config.v1.json", "utf8");
+  env.CONFIG = { get: async (key) => key === "forum:tags" ? JSON.stringify({ submitted: "tag" }) : config };
+  env.SUBMITTED_CHANNEL_ID = "review-forum";
+  env.FORUM_CHANNEL_ID = "public-forum";
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body || "{}") });
+    if (url.endsWith("/channels/review-forum/threads")) return new Response("Missing Permissions", { status: 403 });
+    return Response.json({ id: "ok" });
+  };
+  try {
+    await env.DB.prepare("UPDATE ideas SET status='final_draft',review_thread_id=NULL,review_message_id=NULL,message_id='public-starter' WHERE id=1").run();
+    let work;
+    const ack = await handleInteraction(env, { waitUntil(p) { work = p; } }, {
+      type: 3, guild_id: "guild", channel_id: "public", application_id: "app", token: "token",
+      member: { roles: ["council"], user: { id: A.id, username: A.name } },
+      message: { id: "public-starter" },
+      data: { custom_id: "idea:status:1", values: ["submitted"] },
+    });
+    assert.equal((await ack.json()).type, 6);
+    await work;
+    const saved = await env.DB.prepare("SELECT * FROM ideas WHERE id=1").first();
+    assert.equal(saved.status, "submitted");
+    assert.equal(saved.review_thread_id, null);
+    const warning = calls.find((c) => c.url.includes("/webhooks/") && c.method === "POST");
+    assert.equal(warning.body.flags, 64);
+    assert.match(warning.body.content, /private Council copy could not be created or linked/);
+    assert.deepEqual(warning.body.allowed_mentions, { parse: [] });
+    assert.ok(!calls.some((c) => c.body.locked === true), "Do not lock a source whose private copy is missing");
+  } finally { globalThis.fetch = oldFetch; await mf.dispose(); }
+});

@@ -234,7 +234,28 @@ export async function withReviewSummary(
   idea: IdeaRow,
   embeds: Record<string, unknown>[],
 ) {
-  return withSummaryEmbed(embeds, await assessmentSummaryEmbed(env, idea));
+  // Assessment data is optional decoration, never a prerequisite for delivering
+  // the private idea card. Keep approval/recording functions strict.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const summary = await Promise.race([
+      assessmentSummaryEmbed(env, idea),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(Error("Assessment summary read timed out")), 2000);
+      }),
+    ]);
+    return withSummaryEmbed(embeds, summary);
+  } catch (error) {
+    console.error("assessment summary unavailable", { ideaId: idea.id, error: (error as Error).message });
+    return withSummaryEmbed(embeds, {
+      title: "Assessment temporarily unavailable",
+      description: "The idea can still be reviewed by Council. Assessment data could not be loaded. Try Assess idea again after the service or database migrations have been restored.",
+      color: 0xfee75c,
+      footer: { text: SUMMARY_MARKER },
+    });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 export async function syncAssessmentSummary(env: Env, idea: IdeaRow) {
   // Only edit the private review starter. Never add assessment data to public posts.
