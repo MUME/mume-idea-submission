@@ -338,18 +338,8 @@ async function applyTransition(
         }
       } catch (e) {
         console.error("review copy creation failed", e);
-        await discordFetch(env, `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}`, {
-          method: "POST", unauthenticated: true,
-          body: {
-            content: `Idea #${idea.id} is Submitted, but its private Council copy could not be created or linked. Ask a maintainer to run the private-copy repair tool. Do not resubmit blindly: a Discord post may already have been delivered.`,
-            flags: EPHEMERAL,
-            allowed_mentions: { parse: [] },
-          },
-        }).catch((noticeError) => console.error("private review delivery warning failed", noticeError));
       }
-      // Keep the source available when delivery failed; lock it only after the
-      // private copy is attached successfully.
-      if (idea.thread_id && updated.review_thread_id) {
+      if (idea.thread_id) {
         await lockThread(env, idea.thread_id).catch((e) =>
           console.error("public lock skipped (needs Manage Threads)", e),
         );

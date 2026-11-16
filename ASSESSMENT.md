@@ -228,43 +228,6 @@ The checks popup lists all selected issues in a heading. Its Summary field is op
 
 After the checks form is submitted, the private panel explicitly confirms either **Checks saved** or **Change request saved**, showing the selected checks and the entered summary. For another member's assessment, it explains that the current checks stay unchanged until the request is accepted/backed and provides a View change requests button. Worker diagnostics record selected issue IDs, summary length and whether a request was proposed, without recording summary text.
 
-
-## Private review delivery failures
-
-Creating or refreshing a private idea card treats the assessment summary as optional
-decoration. Assessment reads have a two-second budget. If a read fails (including
-missing migration 0006), the idea card and assessment button are still delivered with
-**Assessment temporarily unavailable**. This fallback never supplies scores, pass
-checks or agreements; assessment mutations and the Reviewed database guard remain strict.
-
-If Discord creation or attachment fails, the submitting Council member receives a
-private warning and the public source is not newly locked. Do not resubmit blindly:
-Discord may have accepted a post even when its response or the database attachment failed.
-
-For already-missing copies, use the manual repair tool from the repository root:
-
-```bash
-node scripts/repair-review-copies.mjs --config wrangler.mudpit.toml
-```
-
-The default is read-only: it reports Submitted ideas missing either private-copy ID.
-An explicit config is required. For application, load the matching bot credentials,
-pause new Submitted transitions, and run only one repair process:
-
-```bash
-MUME_ENV_FILE=.dev.vars.mudpit node scripts/repair-review-copies.mjs --config wrangler.mudpit.toml --idea 5 --apply --submissions-paused
-```
-
-For production, the maintainer substitutes the production config and credentials.
-The tool scans active and archived threads in the configured private forum, verifies
-the bot author and idea footer, and reattaches an existing copy before considering
-creation. If discovery fails or several copies exist, it stops for manual inspection.
-If no copy exists, it copies the verified public idea card and adds the private controls,
-without reading assessment tables. It conditionally attaches IDs and verifies the result.
-It never deletes posts or changes idea status, approvals or assessment history.
-
-This is a deliberate maintenance operation, not an automatic cron retry: pausing
-submissions and using one repair process is required to prevent concurrent creation.
-A full forum scan may hit Discord rate limits; it stops rather than creating after an
-incomplete scan. The initial public-reaction snapshot is not recreated by this tool.
-Open Assess idea afterwards to populate the current assessment card once available.
+Assessment-summary reads are optional when creating or refreshing private idea cards.
+If a read fails or times out, the idea card and assessment button are still delivered
+with **Assessment temporarily unavailable**. Approval checks remain strict.
