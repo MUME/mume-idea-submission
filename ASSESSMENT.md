@@ -4,11 +4,15 @@ This follows merged PR #2 with the shared assessment improvements tested in Mudp
 
 ## Review flow
 
-1. In the private Council review thread, click **Assess idea**, then **Start
-   assessment**. Any Council member can start. Their name is shown as the editor;
-   merely opening a panel does not claim the assessment. Existing drafts keep their
-   scores, checks and history and start with no assigned editor after migration 0006.
-2. Click **Score** for the first scoring. Select all three **1–5 dropdowns**;
+1. In the private Council review thread, click **Assess idea**. Opening the working
+   panel automatically starts an unclaimed assessment and shows you as its editor;
+   there is no separate Start assessment button. Existing editors are preserved:
+   other members can review or request changes. Concurrent openings claim only one
+   editor. Existing drafts retain their scores, checks and history.
+2. Click **Score** for the first scoring. The **Save and submit scores** popup uses
+   Discord's native **Submit** button: it saves the scores and closes your personal
+   assessment panel in one step. Unselected checks pass by default; there is no
+   required pass/fail selection. Select all three **1–5 dropdowns**;
    no explanation is required. All categories are mandatory and the popup says
    **Please score all categories, or cancel**. After scores have been submitted,
    use the separate **Submit changed scores** button; existing selections are
@@ -49,8 +53,9 @@ This follows merged PR #2 with the shared assessment improvements tested in Mudp
    one second for an internal return/defer record. Closing freezes
    editing and request application. The existing Reviewed gate still requires three
    agreements on the complete current scores, even for a return/defer assessment.
-9. **Reopen assessment** clears both approvals and the editor so any Council member
-   can start the next round. Scores and request/event history remain. A Resolved idea
+9. **Reopen assessment** clears both approvals and opens the next round with the
+   reopening member as editor (unless a concurrent opener has already claimed it).
+   Scores and request/event history remain. A Resolved idea
    must first be reopened using its status dropdown.
 
 A stable **Current assessment** summary sits directly below the idea in the private
@@ -62,9 +67,11 @@ added to public posts or exports. Long private idea cards reserve space within
 Discord's combined embed budget; stored idea content is preserved.
 
 Scores appear above Checks in the personal panel, with the current state at the top.
-Scores, Checks and assessment actions are separate bordered sections. **Second**
+The score/edit controls sit directly below **Current state**, before the detailed
+rubric. **Submit Assessment** stays at the very bottom, after all review sections.
+Scores, Checks and assessment details remain separate bordered sections. **Second**
 and **Withdraw my Second** are adjacent, as are the two score-agreement buttons.
-After starting, the disabled start button reads **Assessment in Progress**.
+**Assessment in Progress** is shown as status text, not as a button.
 There is no Internal note control; existing stored notes/history remain intact.
 
 Actions and component-modal submissions update the same private panel rather than
@@ -160,7 +167,7 @@ only by a different Council member and only while the assessment is open.
 
 The score modal uses three required Discord Label/String Select components and
 completion/cancellation instructions in the first label description. Initial scoring has no reason input;
-changing submitted scores adds an optional reason input, validated on submission. Both forms also contain an optional Summary field, prefilled from the shared draft; this wording is retained in previews, the head-of-thread assessment and the recorded submission. The form uses Labels only (at most five), without a standalone Text Display. Discord modals have no disabled fields or live
+changing submitted scores adds an optional reason input, validated on submission. Both forms also contain an optional Summary field, prefilled from the shared draft; this wording is retained in previews, the head-of-thread assessment and the recorded submission. Submitting either score form persists the scores (or a change request), updates the shared summary and dismisses the personal panel. Discord fixes the native button label to Submit; the modal title and instructions explain the save-and-submit action. The form uses Labels only (at most five), without a standalone Text Display. Discord modals have no disabled fields or live
 on-change callbacks, so the reason cannot dynamically gray out or become required
 while the popup is open. Conditional reason validation happens on submission.
 Requiring all three selects makes Discord keep the native popup open when a
@@ -227,3 +234,9 @@ Modal openings read the existing review, idea status/private thread and prior sc
 The checks popup lists all selected issues in a heading. Its Summary field is optional and says “Add any summary of the issue you would like to include.” Blank summaries are allowed through validation, editor changes, change requests, seconds and submission. The audit reason still records the selected checks or their removal; that generated audit description is not inserted into the user's summary.
 
 After the checks form is submitted, the private panel explicitly confirms either **Checks saved** or **Change request saved**, showing the selected checks and the entered summary. For another member's assessment, it explains that the current checks stay unchanged until the request is accepted/backed and provides a View change requests button. Worker diagnostics record selected issue IDs, summary length and whether a request was proposed, without recording summary text.
+
+Assessment-summary reads are optional when creating or refreshing private idea cards.
+If a read fails or times out, the idea card and assessment button are still delivered
+with **Assessment temporarily unavailable**. Approval checks remain strict.
+
+Saving scores does not require any check selection, a checks second or three score agreements. It saves immediately, counts the initial submitter as one agreement and closes only the personal panel. Final Council recording and marking the idea Reviewed retain their existing approval requirements. A summary-refresh or panel-dismissal failure does not roll back a successful database save or report that save as failed.

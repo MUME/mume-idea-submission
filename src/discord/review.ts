@@ -234,7 +234,28 @@ export async function withReviewSummary(
   idea: IdeaRow,
   embeds: Record<string, unknown>[],
 ) {
-  return withSummaryEmbed(embeds, await assessmentSummaryEmbed(env, idea));
+  // Assessment data is optional decoration, never a prerequisite for delivering
+  // the private idea card. Keep approval/recording functions strict.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const summary = await Promise.race([
+      assessmentSummaryEmbed(env, idea),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(Error("Assessment summary read timed out")), 2000);
+      }),
+    ]);
+    return withSummaryEmbed(embeds, summary);
+  } catch (error) {
+    console.error("assessment summary unavailable", { ideaId: idea.id, error: (error as Error).message });
+    return withSummaryEmbed(embeds, {
+      title: "Assessment temporarily unavailable",
+      description: "The idea can still be reviewed by Council. Assessment data could not be loaded. Try Assess idea again after the service or database migrations have been restored.",
+      color: 0xfee75c,
+      footer: { text: SUMMARY_MARKER },
+    });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 export async function syncAssessmentSummary(env: Env, idea: IdeaRow) {
   // Only edit the private review starter. Never add assessment data to public posts.
@@ -358,6 +379,12 @@ export async function reviewPayload(
             : "Checks pass."
         }\n${checksStatus}\nScore agreements: ${votes.length}/${AGREEMENTS_REQUIRED}.${pending.length ? "\n" + pending.length + " change request(s) awaiting review." : " No changes awaiting review."}`,
       ),
+      row(
+        button("Score", cid("scores"), 1, locked || scoredBefore),
+        ...(scoredBefore
+          ? [button("Submit changed scores", cid("changescores"), 1, locked)]
+          : []),
+      ),
     ),
     ...(draft.note.trim() ? [text(`**Summary:** ${escape(draft.note)}`)] : []),
     box(
@@ -375,12 +402,6 @@ export async function reviewPayload(
                 .slice(0, 700)
             : ""
         }`,
-      ),
-      row(
-        button("Score", cid("scores"), 1, locked || scoredBefore),
-        ...(scoredBefore
-          ? [button("Submit changed scores", cid("changescores"), 1, locked)]
-          : []),
       ),
       row(
         button(
@@ -453,31 +474,6 @@ export async function reviewPayload(
       text(
         `**${state}**${r.author_id ? " · Editor: " + escape(r.author_name || "Council") : ""}${pending.length ? "\nChange requests: " + pending.map((q) => `#${q.id} by ${escape(q.proposer_name)}`).join(", ") : ""}`,
       ),
-      row(
-        button(
-          closed
-            ? "Reopen assessment"
-            : r.author_id
-              ? "Assessment in Progress"
-              : "Start assessment",
-          cid(closed ? "reopen" : "start"),
-          2,
-          busy || (!closed && !!r.author_id),
-        ),
-        button(
-          busy ? "Retry submission" : "Submit Assessment",
-          cid("publish"),
-          3,
-          closed ||
-            stale ||
-            !readyToClose(
-              draft,
-              votes.length,
-              r.checks_proposer_id,
-              r.checks_seconder_id,
-            ),
-        ),
-      ),
       row(button("Assessment history", cid("history"))),
       row({
         type: 3,
@@ -487,6 +483,17 @@ export async function reviewPayload(
         max_values: 1,
         options: extraOptions,
       }),
+      row(
+        ...(closed ? [button("Reopen assessment", cid("reopen"), 2)] : []),
+        button(
+          busy ? "Retry submission" : "Submit Assessment",
+          cid("publish"),
+          3,
+          closed || stale || !readyToClose(
+            draft, votes.length, r.checks_proposer_id, r.checks_seconder_id,
+          ),
+        ),
+      ),
     ),
   ]);
 }
@@ -921,7 +928,7 @@ export async function handleReviewInteraction(
       if (r.revision !== rev || r.status !== "open")
         return fail("This assessment changed or closed. Refresh it.");
       const d: ReviewDraft = JSON.parse(r.draft);
-      if (!r.author_id) return fail("Click Start assessment first.");
+      if (!r.author_id) return fail("Reload the assessment before editing.");
       const proposing = r.author_id !== actor.id;
       if (op === "scores" || op === "changescores") {
         const prior = draftResult(d).total !== null || !!r.previously_scored;
@@ -931,21 +938,22 @@ export async function handleReviewInteraction(
           );
         return modal(
           `review:savescores:${id}:${rev}`,
-          prior
-            ? proposing
-              ? "Propose changed scores"
-              : "Submit changed scores"
-            : "Submit initial scores",
+          proposing
+            ? "Submit score change request"
+            : prior
+              ? "Save and submit changed scores"
+              : "Save and submit scores",
           [
             ...CRITERIA.map((c) => ({
               type: 18,
               label: c.name + (c.weight === 2 ? " (counts twice)" : ""),
               description:
                 c.id === "usefulness"
-                  ? "Please score all categories, or cancel. " +
-                    (prior
-                      ? "Current scores are preselected."
-                      : "Initial scores need no explanation.")
+                  ? proposing
+                    ? "Submit sends your score change request and closes this panel."
+                    : prior
+                      ? "Current scores are preselected. Submit saves your changes and closes this panel."
+                      : "Please score all categories, or cancel. Submit saves your scores and closes this panel."
                   : undefined,
               component: {
                 type: 3,
@@ -1090,6 +1098,36 @@ export async function handleReviewInteraction(
             values.reason ?? "",
             values.summary,
           );
+          // The modal Submit is the save operation. No separate panel submission
+          // is needed to persist ratings or the submitter's first agreement.
+          // Update the shared thread independently of dismissing this personal panel.
+          await Promise.all([
+            syncAssessmentSummary(env, idea).catch((error) =>
+              console.error("assessment summary refresh", error),
+            ),
+            (async () => {
+              try {
+                await discordFetch(env, webhook, {
+                  method: "DELETE",
+                  unauthenticated: true,
+                });
+              } catch (error) {
+                // The database save succeeded. A failed dismissal must not be
+                // reported as a failed assessment submission.
+                console.error("score panel dismissal failed", error);
+                await discordFetch(env, webhook, {
+                  method: "PATCH",
+                  unauthenticated: true,
+                  body: summaryPanel(
+                    "Scores submitted",
+                    "Your score submission was processed. You can dismiss this panel. Open Assess idea to see the saved assessment or change request.",
+                    [],
+                  ),
+                }).catch((noticeError) => console.error("score save notice failed", noticeError));
+              }
+            })(),
+          ]);
+          return;
         } else if (op === "setissues" && i.type === 5) {
           const mask = Number(parts[4]);
           if (!Number.isInteger(mask) || mask < 0 || mask > 63)
@@ -1147,6 +1185,19 @@ export async function handleReviewInteraction(
           await reopen(env, r, idea, actor);
         } else if (!readOnly) throw Error("Unknown assessment action.");
         r = await getReview(env, idea);
+        // Opening the working panel is enough to begin an unclaimed assessment.
+        // The database compare-and-set picks one editor if members open together.
+        if (i.type === 3 && ["open", "refresh", "reopen"].includes(op) &&
+            idea.status !== "resolved" && r.status === "open" && !r.author_id) {
+          try {
+            await startReview(env, r, actor);
+          } catch (error) {
+            const current = await getReview(env, idea);
+            if (!current.author_id || current.status !== "open") throw error;
+            // Another opener won the claim; show their assessment without taking it over.
+          }
+          r = await getReview(env, idea);
+        }
         if (
           ![
             "history",
