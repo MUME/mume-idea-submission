@@ -46,6 +46,12 @@ export const TAG_NAME: Record<Status, string> = {
   resolved: "Resolved",
 };
 
+// Review forum ("submitted-ideas") workflow tags. The Council sets most by hand;
+// only "New" is applied automatically, when the review post is first created, so
+// every post lands tagged (and so creation still succeeds if the forum requires a
+// tag on post). Matched by name against that channel's available_tags.
+export const REVIEW_NEW_TAG = "New";
+
 // Seeded reactions, in order. With "Add Reactions" denied on the forum channel,
 // members can only click these pre-placed emoji — a thumbs up / thumbs down poll.
 export const VOTE_EMOJIS = ["👍", "👎"];
@@ -55,6 +61,7 @@ export const KV = {
   liveConfig: "form:config",
   configVersion: (v: number) => `form:config:v${v}`,
   tagIds: "forum:tags",
+  reviewTags: "forum:review-tags",
   pinnedSubmit: "pinned:submit",
   editIntent: (userId: string) => `edit:${userId}`,
   // Marks that the 30-day "still open" notice has been sent for an idea (once only).

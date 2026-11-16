@@ -2,7 +2,7 @@
 
 import type { Env, FormConfig, IdeaRow, Status } from "../types";
 import { reviewButton, withReviewSummary } from "./review";
-import { DISCORD_API, KV, STATUSES, TAG_NAME, VOTE_EMOJIS } from "../constants";
+import { DISCORD_API, KV, REVIEW_NEW_TAG, STATUSES, TAG_NAME, VOTE_EMOJIS } from "../constants";
 import { DiscordRestError, discordFetch, discordJson } from "./rest";
 import { buildEmbed, buildIdeaComponents, ideaThreadName } from "./embed";
 
@@ -109,19 +109,38 @@ export async function createIdeaPost(
   return { threadId: res.id, messageId: res.message?.id ?? res.id };
 }
 
+// Resolve the review forum's "New" tag id by name, cached in KV. Best-effort: a
+// miss is not cached (so it is retried once the Council has created the tag) and
+// never blocks submission — createReviewPost just posts without the chip.
+export async function reviewNewTagId(env: Env): Promise<string | undefined> {
+  try {
+    const cached = await env.CONFIG.get(KV.reviewTags);
+    if (cached) return (JSON.parse(cached) as { new?: string }).new;
+    const channel = await discordJson<ForumChannel>(env, `/channels/${env.SUBMITTED_CHANNEL_ID}`);
+    const id = channel.available_tags.find((t) => t.name === REVIEW_NEW_TAG)?.id as string | undefined;
+    if (id) await env.CONFIG.put(KV.reviewTags, JSON.stringify({ new: id }));
+    return id;
+  } catch (e) {
+    console.error("could not resolve review 'New' tag — creating review post without it", e);
+    return undefined;
+  }
+}
+
 // Create the private review-forum copy (submitted-ideas) carrying the working
-// controls. No tags — the badge shows status, and the review forum may not grant
-// the bot tag permissions either.
+// controls. Auto-stamped "New" so the Council's to-do view is populated on arrival
+// (and so creation succeeds when the forum requires a tag on post).
 export async function createReviewPost(
   env: Env,
   idea: IdeaRow,
   config: FormConfig,
 ): Promise<{ threadId: string; messageId: string }> {
+  const newTag = await reviewNewTagId(env);
   const res = await discordJson<ThreadCreateResponse>(env, `/channels/${env.SUBMITTED_CHANNEL_ID}/threads`, {
     method: "POST",
     body: {
       name: ideaThreadName(idea.id, idea.title),
       auto_archive_duration: AUTO_ARCHIVE,
+      applied_tags: newTag ? [newTag] : [],
       message: {
         embeds: await withReviewSummary(env, idea, [buildEmbed(idea, config)]),
         components: withAssessButton(env, idea.id, buildIdeaComponents(idea.id)),
