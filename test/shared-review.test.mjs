@@ -900,8 +900,13 @@ test("idea changes and concurrent author edits prevent applying outdated proposa
 test("one Score modal edits all criteria; unchanged scores require no reason and preserve agreements", async () => {
   const { mf, env, idea } = await fixture();
   const originalFetch = globalThis.fetch;
-  let delivered;
+  let delivered, dismissed = 0;
   globalThis.fetch = async (_url, options) => {
+    if (options.method === "DELETE") {
+      dismissed++;
+      delivered = undefined;
+      return new Response(null, { status: 204 });
+    }
     delivered = JSON.parse(options.body);
     return new Response("{}");
   };
@@ -1042,7 +1047,8 @@ test("one Score modal edits all criteria; unchanged scores require no reason and
       5,
       "Incomplete input must not clear a saved score",
     );
-    const proposal = await submit(
+    const beforeProposal = dismissed;
+    await submit(
       interaction(
         "savescores",
         r.revision,
@@ -1052,7 +1058,8 @@ test("one Score modal edits all criteria; unchanged scores require no reason and
       ),
     );
     assert.equal((await getReview(env, idea)).revision, r.revision);
-    assert.match(panelText(proposal), /Change requests:.*Bob/);
+    assert.equal(dismissed, beforeProposal + 1);
+    assert.ok((await reviewChanges(env, idea.id)).some((q) => q.proposer_id === B.id && q.status === "pending"));
     const request = (await reviewChanges(env, idea.id))[0];
     assert.equal(JSON.parse(request.draft).scores.feasibility, 5);
     const card = await submit(interaction("changes", r.revision));
@@ -1606,7 +1613,7 @@ test("scoring modal distinguishes initial and changed scoring, requires all drop
       await handleReviewInteraction(env, ctx, i("scores"))
     ).json();
     assert.equal(modal.type, 9);
-    assert.equal(modal.data.title, "Submit initial scores");
+    assert.equal(modal.data.title, "Save and submit scores");
     assert.match(
       modal.data.components[0].description,
       /Please score all categories, or cancel/,
@@ -1624,7 +1631,7 @@ test("scoring modal distinguishes initial and changed scoring, requires all drop
     modal = await (
       await handleReviewInteraction(env, ctx, i("changescores"))
     ).json();
-    assert.equal(modal.data.title, "Submit changed scores");
+    assert.equal(modal.data.title, "Save and submit changed scores");
     for (const label of modal.data.components) {
       assert.ok(label.label.length <= 45);
       assert.ok((label.description || "").length <= 100);
@@ -2531,4 +2538,96 @@ test("viewing history or a closed assessment does not claim it; reopening needs 
     assert.ok(shown.components.at(-1).components.at(-1).components.some((c) => c.label === "Submit Assessment"));
     assert.ok(!nodes(shown).some((c) => c.type === 2 && c.label === "Start assessment"));
   } finally { globalThis.fetch = oldFetch; await mf.dispose(); }
+});
+
+test("the score form saves and dismisses the personal panel without requiring checks or final agreement", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : null });
+    return options.method === "DELETE" ? new Response(null, { status: 204 }) : Response.json({});
+  };
+  const submit = async (r, values) => {
+    let pending;
+    const ack = await handleReviewInteraction(env, { waitUntil(p) { pending = p; } }, {
+      type: 5, guild_id: "guild", channel_id: "private", application_id: "app", token: "token",
+      message: { id: "personal-panel", flags: 64 | 32768 },
+      member: { roles: ["council"], user: { id: A.id, username: A.name } },
+      data: { custom_id: `review:savescores:1:${r.revision}`,
+        components: Object.entries(values).map(([id, value]) => ({
+          type: 18, component: id === "summary"
+            ? { type: 4, custom_id: id, value }
+            : { type: 3, custom_id: id, values: [String(value)] },
+        })),
+      },
+    });
+    assert.equal((await ack.json()).type, 6);
+    await pending;
+  };
+  try {
+    let r = await getReview(env, idea);
+    await startReview(env, r, A);
+    r = await getReview(env, idea);
+    const before = r.revision;
+    await submit(r, { usefulness: 3, feasibility: 4 });
+    assert.equal(calls.filter((c) => c.method === "DELETE").length, 0, "Incomplete scores must not dismiss the panel");
+    assert.equal((await getReview(env, idea)).revision, before);
+    assert.match(panelText(calls.at(-1).body), /score all categories/);
+    calls.length = 0;
+    await submit(r, { usefulness: 3, feasibility: 4, interest: 2, summary: "Useful, contained work." });
+    r = await getReview(env, idea);
+    const draft = JSON.parse(r.draft);
+    assert.deepEqual(draft.scores, { usefulness: 3, feasibility: 4, interest: 2 });
+    assert.deepEqual(draft.issues, []);
+    assert.equal(draft.issueReason, "");
+    assert.equal(draft.note, "Useful, contained work.");
+    assert.equal(r.status, "open", "Close only the personal panel, not the Council assessment");
+    assert.deepEqual((await agreements(env, r)).map((v) => v.id), [A.id]);
+    assert.equal(await canMarkReviewed(env, idea), false);
+    assert.equal(calls.filter((c) => c.method === "DELETE").length, 1);
+    assert.ok(calls.every((c) => c.url.includes("/webhooks/") && c.url.endsWith("/messages/@original")), "Never delete the shared thread starter");
+    assert.ok(!calls.some((c) => c.method === "PATCH"), "Saving needs no second personal-panel submission");
+    await agreeReview(env, r, B);
+    await agreeReview(env, r, C);
+    assert.equal(await canMarkReviewed(env, idea), true);
+  } finally { globalThis.fetch = oldFetch; await mf.dispose(); }
+});
+
+test("a saved score submission stays successful if shared-summary refresh or panel dismissal fails", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch, prepare = env.DB.prepare;
+  let shown, dismissals = 0;
+  globalThis.fetch = async (_url, options) => {
+    if (options.method === "DELETE") { dismissals++; throw Error("Cannot dismiss panel"); }
+    shown = JSON.parse(options.body);
+    return Response.json({});
+  };
+  try {
+    let r = await getReview(env, idea);
+    await startReview(env, r, A);
+    r = await getReview(env, idea);
+    await env.DB.prepare("UPDATE ideas SET review_message_id='private-starter' WHERE id=1").run();
+    env.DB.prepare = (sql) => {
+      if (sql.includes("SELECT COALESCE(MAX(id),0) AS id FROM council_review_events"))
+        throw Error("D1 summary read unavailable");
+      return prepare.call(env.DB, sql);
+    };
+    let pending;
+    await handleReviewInteraction(env, { waitUntil(p) { pending = p; } }, {
+      type: 5, guild_id: "guild", channel_id: "private", application_id: "app", token: "token",
+      message: { id: "personal-panel", flags: 64 | 32768 },
+      member: { roles: ["council"], user: { id: A.id, username: A.name } },
+      data: { custom_id: `review:savescores:1:${r.revision}`,
+        components: CRITERIA.map((c) => ({ type: 18, component: { type: 3, custom_id: c.id, values: ["3"] } })),
+      },
+    });
+    await pending;
+    r = await getReview(env, idea);
+    assert.deepEqual(JSON.parse(r.draft).scores, { usefulness: 3, feasibility: 3, interest: 3 });
+    assert.equal((await agreements(env, r)).length, 1);
+    assert.equal(dismissals, 1);
+    assert.match(panelText(shown), /Scores submitted/);
+    assert.ok(!panelText(shown).includes("Assessment failed"));
+  } finally { env.DB.prepare = prepare; globalThis.fetch = oldFetch; await mf.dispose(); }
 });

@@ -938,21 +938,22 @@ export async function handleReviewInteraction(
           );
         return modal(
           `review:savescores:${id}:${rev}`,
-          prior
-            ? proposing
-              ? "Propose changed scores"
-              : "Submit changed scores"
-            : "Submit initial scores",
+          proposing
+            ? "Submit score change request"
+            : prior
+              ? "Save and submit changed scores"
+              : "Save and submit scores",
           [
             ...CRITERIA.map((c) => ({
               type: 18,
               label: c.name + (c.weight === 2 ? " (counts twice)" : ""),
               description:
                 c.id === "usefulness"
-                  ? "Please score all categories, or cancel. " +
-                    (prior
-                      ? "Current scores are preselected."
-                      : "Initial scores need no explanation.")
+                  ? proposing
+                    ? "Submit sends your score change request and closes this panel."
+                    : prior
+                      ? "Current scores are preselected. Submit saves your changes and closes this panel."
+                      : "Please score all categories, or cancel. Submit saves your scores and closes this panel."
                   : undefined,
               component: {
                 type: 3,
@@ -1097,6 +1098,36 @@ export async function handleReviewInteraction(
             values.reason ?? "",
             values.summary,
           );
+          // The modal Submit is the save operation. No separate panel submission
+          // is needed to persist ratings or the submitter's first agreement.
+          // Update the shared thread independently of dismissing this personal panel.
+          await Promise.all([
+            syncAssessmentSummary(env, idea).catch((error) =>
+              console.error("assessment summary refresh", error),
+            ),
+            (async () => {
+              try {
+                await discordFetch(env, webhook, {
+                  method: "DELETE",
+                  unauthenticated: true,
+                });
+              } catch (error) {
+                // The database save succeeded. A failed dismissal must not be
+                // reported as a failed assessment submission.
+                console.error("score panel dismissal failed", error);
+                await discordFetch(env, webhook, {
+                  method: "PATCH",
+                  unauthenticated: true,
+                  body: summaryPanel(
+                    "Scores submitted",
+                    "Your score submission was processed. You can dismiss this panel. Open Assess idea to see the saved assessment or change request.",
+                    [],
+                  ),
+                }).catch((noticeError) => console.error("score save notice failed", noticeError));
+              }
+            })(),
+          ]);
+          return;
         } else if (op === "setissues" && i.type === 5) {
           const mask = Number(parts[4]);
           if (!Number.isInteger(mask) || mask < 0 || mask > 63)

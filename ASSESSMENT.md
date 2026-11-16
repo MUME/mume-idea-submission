@@ -9,7 +9,10 @@ This follows merged PR #2 with the shared assessment improvements tested in Mudp
    there is no separate Start assessment button. Existing editors are preserved:
    other members can review or request changes. Concurrent openings claim only one
    editor. Existing drafts retain their scores, checks and history.
-2. Click **Score** for the first scoring. Select all three **1–5 dropdowns**;
+2. Click **Score** for the first scoring. The **Save and submit scores** popup uses
+   Discord's native **Submit** button: it saves the scores and closes your personal
+   assessment panel in one step. Unselected checks pass by default; there is no
+   required pass/fail selection. Select all three **1–5 dropdowns**;
    no explanation is required. All categories are mandatory and the popup says
    **Please score all categories, or cancel**. After scores have been submitted,
    use the separate **Submit changed scores** button; existing selections are
@@ -164,7 +167,7 @@ only by a different Council member and only while the assessment is open.
 
 The score modal uses three required Discord Label/String Select components and
 completion/cancellation instructions in the first label description. Initial scoring has no reason input;
-changing submitted scores adds an optional reason input, validated on submission. Both forms also contain an optional Summary field, prefilled from the shared draft; this wording is retained in previews, the head-of-thread assessment and the recorded submission. The form uses Labels only (at most five), without a standalone Text Display. Discord modals have no disabled fields or live
+changing submitted scores adds an optional reason input, validated on submission. Both forms also contain an optional Summary field, prefilled from the shared draft; this wording is retained in previews, the head-of-thread assessment and the recorded submission. Submitting either score form persists the scores (or a change request), updates the shared summary and dismisses the personal panel. Discord fixes the native button label to Submit; the modal title and instructions explain the save-and-submit action. The form uses Labels only (at most five), without a standalone Text Display. Discord modals have no disabled fields or live
 on-change callbacks, so the reason cannot dynamically gray out or become required
 while the popup is open. Conditional reason validation happens on submission.
 Requiring all three selects makes Discord keep the native popup open when a
@@ -235,3 +238,5 @@ After the checks form is submitted, the private panel explicitly confirms either
 Assessment-summary reads are optional when creating or refreshing private idea cards.
 If a read fails or times out, the idea card and assessment button are still delivered
 with **Assessment temporarily unavailable**. Approval checks remain strict.
+
+Saving scores does not require any check selection, a checks second or three score agreements. It saves immediately, counts the initial submitter as one agreement and closes only the personal panel. Final Council recording and marking the idea Reviewed retain their existing approval requirements. A summary-refresh or panel-dismissal failure does not roll back a successful database save or report that save as failed.
