@@ -443,7 +443,7 @@ export async function saveOrRequestChange(
   reason: string,
   submitScores = false,
 ) {
-  if (!r.author_id) throw Error("Click Start assessment first.");
+  if (!r.author_id) throw Error("Open the assessment before editing.");
   if (r.author_id === actor.id)
     return commitRevision(
       env,

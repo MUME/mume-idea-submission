@@ -4,10 +4,11 @@ This follows merged PR #2 with the shared assessment improvements tested in Mudp
 
 ## Review flow
 
-1. In the private Council review thread, click **Assess idea**, then **Start
-   assessment**. Any Council member can start. Their name is shown as the editor;
-   merely opening a panel does not claim the assessment. Existing drafts keep their
-   scores, checks and history and start with no assigned editor after migration 0006.
+1. In the private Council review thread, click **Assess idea**. Opening the working
+   panel automatically starts an unclaimed assessment and shows you as its editor;
+   there is no separate Start assessment button. Existing editors are preserved:
+   other members can review or request changes. Concurrent openings claim only one
+   editor. Existing drafts retain their scores, checks and history.
 2. Click **Score** for the first scoring. Select all three **1–5 dropdowns**;
    no explanation is required. All categories are mandatory and the popup says
    **Please score all categories, or cancel**. After scores have been submitted,
@@ -49,8 +50,9 @@ This follows merged PR #2 with the shared assessment improvements tested in Mudp
    one second for an internal return/defer record. Closing freezes
    editing and request application. The existing Reviewed gate still requires three
    agreements on the complete current scores, even for a return/defer assessment.
-9. **Reopen assessment** clears both approvals and the editor so any Council member
-   can start the next round. Scores and request/event history remain. A Resolved idea
+9. **Reopen assessment** clears both approvals and opens the next round with the
+   reopening member as editor (unless a concurrent opener has already claimed it).
+   Scores and request/event history remain. A Resolved idea
    must first be reopened using its status dropdown.
 
 A stable **Current assessment** summary sits directly below the idea in the private
@@ -62,9 +64,11 @@ added to public posts or exports. Long private idea cards reserve space within
 Discord's combined embed budget; stored idea content is preserved.
 
 Scores appear above Checks in the personal panel, with the current state at the top.
-Scores, Checks and assessment actions are separate bordered sections. **Second**
+The score/edit controls sit directly below **Current state**, before the detailed
+rubric. **Submit Assessment** stays at the very bottom, after all review sections.
+Scores, Checks and assessment details remain separate bordered sections. **Second**
 and **Withdraw my Second** are adjacent, as are the two score-agreement buttons.
-After starting, the disabled start button reads **Assessment in Progress**.
+**Assessment in Progress** is shown as status text, not as a button.
 There is no Internal note control; existing stored notes/history remain intact.
 
 Actions and component-modal submissions update the same private panel rather than

@@ -379,6 +379,12 @@ export async function reviewPayload(
             : "Checks pass."
         }\n${checksStatus}\nScore agreements: ${votes.length}/${AGREEMENTS_REQUIRED}.${pending.length ? "\n" + pending.length + " change request(s) awaiting review." : " No changes awaiting review."}`,
       ),
+      row(
+        button("Score", cid("scores"), 1, locked || scoredBefore),
+        ...(scoredBefore
+          ? [button("Submit changed scores", cid("changescores"), 1, locked)]
+          : []),
+      ),
     ),
     ...(draft.note.trim() ? [text(`**Summary:** ${escape(draft.note)}`)] : []),
     box(
@@ -396,12 +402,6 @@ export async function reviewPayload(
                 .slice(0, 700)
             : ""
         }`,
-      ),
-      row(
-        button("Score", cid("scores"), 1, locked || scoredBefore),
-        ...(scoredBefore
-          ? [button("Submit changed scores", cid("changescores"), 1, locked)]
-          : []),
       ),
       row(
         button(
@@ -474,31 +474,6 @@ export async function reviewPayload(
       text(
         `**${state}**${r.author_id ? " · Editor: " + escape(r.author_name || "Council") : ""}${pending.length ? "\nChange requests: " + pending.map((q) => `#${q.id} by ${escape(q.proposer_name)}`).join(", ") : ""}`,
       ),
-      row(
-        button(
-          closed
-            ? "Reopen assessment"
-            : r.author_id
-              ? "Assessment in Progress"
-              : "Start assessment",
-          cid(closed ? "reopen" : "start"),
-          2,
-          busy || (!closed && !!r.author_id),
-        ),
-        button(
-          busy ? "Retry submission" : "Submit Assessment",
-          cid("publish"),
-          3,
-          closed ||
-            stale ||
-            !readyToClose(
-              draft,
-              votes.length,
-              r.checks_proposer_id,
-              r.checks_seconder_id,
-            ),
-        ),
-      ),
       row(button("Assessment history", cid("history"))),
       row({
         type: 3,
@@ -508,6 +483,17 @@ export async function reviewPayload(
         max_values: 1,
         options: extraOptions,
       }),
+      row(
+        ...(closed ? [button("Reopen assessment", cid("reopen"), 2)] : []),
+        button(
+          busy ? "Retry submission" : "Submit Assessment",
+          cid("publish"),
+          3,
+          closed || stale || !readyToClose(
+            draft, votes.length, r.checks_proposer_id, r.checks_seconder_id,
+          ),
+        ),
+      ),
     ),
   ]);
 }
@@ -942,7 +928,7 @@ export async function handleReviewInteraction(
       if (r.revision !== rev || r.status !== "open")
         return fail("This assessment changed or closed. Refresh it.");
       const d: ReviewDraft = JSON.parse(r.draft);
-      if (!r.author_id) return fail("Click Start assessment first.");
+      if (!r.author_id) return fail("Reload the assessment before editing.");
       const proposing = r.author_id !== actor.id;
       if (op === "scores" || op === "changescores") {
         const prior = draftResult(d).total !== null || !!r.previously_scored;
@@ -1168,6 +1154,19 @@ export async function handleReviewInteraction(
           await reopen(env, r, idea, actor);
         } else if (!readOnly) throw Error("Unknown assessment action.");
         r = await getReview(env, idea);
+        // Opening the working panel is enough to begin an unclaimed assessment.
+        // The database compare-and-set picks one editor if members open together.
+        if (i.type === 3 && ["open", "refresh", "reopen"].includes(op) &&
+            idea.status !== "resolved" && r.status === "open" && !r.author_id) {
+          try {
+            await startReview(env, r, actor);
+          } catch (error) {
+            const current = await getReview(env, idea);
+            if (!current.author_id || current.status !== "open") throw error;
+            // Another opener won the claim; show their assessment without taking it over.
+          }
+          r = await getReview(env, idea);
+        }
         if (
           ![
             "history",

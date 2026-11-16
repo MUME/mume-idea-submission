@@ -1094,15 +1094,19 @@ test("compact panel uses bordered sections, adjacent approval pairs and no Inter
       nodes(p).filter((c) => c.type === 2 && c.label === "Score").length,
       1,
     );
-    assert.ok(
-      nodes(p).some((c) => c.label === "Start assessment" && !c.disabled),
-    );
+    assert.ok(!nodes(p).some((c) => c.type === 2 && c.label === "Start assessment"));
     await startReview(env, r, A);
     r = await getReview(env, idea);
     p = await reviewPayload(env, idea, r, A.id);
-    assert.ok(
-      nodes(p).some((c) => c.label === "Assessment in Progress" && c.disabled),
-    );
+    assert.ok(!nodes(p).some((c) => c.type === 2 && c.label === "Assessment in Progress"));
+    const currentState = p.components.find((c) => c.type === 17 && c.components.some((x) => x.content?.startsWith("**Current state**")));
+    assert.ok(currentState, "Current state has its own section");
+    const actions = currentState.components.find((c) => c.type === 1);
+    assert.ok(actions.components.some((c) => c.label === "Score"));
+    assert.ok(!actions.components.some((c) => c.label === "Submit Assessment"));
+    assert.ok(p.components.at(-1).components.at(-1).components.some((c) => c.label === "Submit Assessment"), "Submit Assessment stays at the bottom");
+    const scoresSection = p.components.find((c) => c.type === 17 && c.components.some((x) => x.content?.startsWith("### Scores")));
+    assert.ok(!nodes({ components: [scoresSection] }).some((c) => ["Score", "Submit changed scores", "Submit Assessment"].includes(c.label)), "Score/edit controls sit with Current state; submission stays below the detailed sections");
     assert.ok(
       !nodes(p).some((c) =>
         [
@@ -2414,4 +2418,117 @@ test("an overloaded assessment read falls back without weakening strict approval
     assert.equal(delivered.message.embeds.at(-1).title, "Assessment temporarily unavailable");
     await assert.rejects(canMarkReviewed(env, idea), /D1 overloaded/);
   } finally { env.DB.prepare = prepare; globalThis.fetch = oldFetch; await mf.dispose(); }
+});
+
+test("opening the working panel starts once, enables scoring and keeps the existing editor on later opens", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch;
+  let shown;
+  globalThis.fetch = async (_url, options) => { shown = JSON.parse(options.body); return Response.json({}); };
+  const view = async (actor, op = "open") => {
+    let pending;
+    const ack = await handleReviewInteraction(env, { waitUntil(p) { pending = p; } }, {
+      type: 3, guild_id: "guild", channel_id: "private", application_id: "app", token: "token",
+      member: { roles: ["council"], user: { id: actor.id, username: actor.name } },
+      data: { custom_id: `review:${op}:1:0` },
+    });
+    assert.equal((await ack.json()).type, 5);
+    await pending;
+  };
+  try {
+    const initial = await getReview(env, idea);
+    await view(A);
+    let r = await getReview(env, idea);
+    assert.equal(r.author_id, A.id);
+    assert.equal(r.revision, initial.revision + 1);
+    assert.equal(r.draft, initial.draft);
+    assert.equal((await agreements(env, r)).length, 0, "Opening does not agree to scores");
+    assert.equal(nodes(shown).find((c) => c.label === "Score").disabled, false);
+    assert.equal(nodes(shown).find((c) => c.custom_id?.includes(":issues:")).disabled, false);
+    assert.ok(!nodes(shown).some((c) => c.type === 2 && /Start assessment|Assessment in Progress/.test(c.label)));
+    await view(B);
+    await view(A, "refresh");
+    const after = await getReview(env, idea);
+    assert.equal(after.author_id, A.id);
+    assert.equal(after.revision, r.revision);
+    const events = await env.DB.prepare("SELECT COUNT(*) AS n FROM council_review_events WHERE idea_id=1 AND action='start'").first();
+    assert.equal(events.n, 1);
+  } finally { globalThis.fetch = oldFetch; await mf.dispose(); }
+});
+
+test("simultaneous assessment openings retain one editor and one start audit event", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch;
+  const batch = env.DB.batch.bind(env.DB);
+  let queue = Promise.resolve();
+  // D1 serializes write transactions; reproduce that in the SQLite adapter.
+  env.DB.batch = (statements) => {
+    const work = queue.then(() => batch(statements));
+    queue = work.catch(() => {});
+    return work;
+  };
+  const panels = [];
+  globalThis.fetch = async (_url, options) => { panels.push(JSON.parse(options.body)); return Response.json({}); };
+  try {
+    const initial = await getReview(env, idea);
+    await Promise.all([A, B].map(async (actor) => {
+      let pending;
+      await handleReviewInteraction(env, { waitUntil(p) { pending = p; } }, {
+        type: 3, guild_id: "guild", channel_id: "private", application_id: "app", token: actor.id,
+        member: { roles: ["council"], user: { id: actor.id, username: actor.name } },
+        data: { custom_id: "review:open:1:0" },
+      });
+      await pending;
+    }));
+    const current = await getReview(env, idea);
+    assert.ok([A.id, B.id].includes(current.author_id));
+    assert.equal(current.revision, initial.revision + 1);
+    const events = await env.DB.prepare("SELECT COUNT(*) AS n FROM council_review_events WHERE idea_id=1 AND action='start'").first();
+    assert.equal(events.n, 1);
+    assert.equal((await agreements(env, current)).length, 0);
+    assert.equal(panels.length, 2);
+    for (const panel of panels) assert.ok(panelText(panel).includes("Editor: " + current.author_name));
+  } finally { globalThis.fetch = oldFetch; await mf.dispose(); }
+});
+
+test("viewing history or a closed assessment does not claim it; reopening needs no extra Start step", async () => {
+  const { mf, env, idea } = await fixture();
+  const oldFetch = globalThis.fetch;
+  let shown;
+  globalThis.fetch = async (_url, options) => { shown = JSON.parse(options.body); return Response.json({}); };
+  const view = async (actor, op, revision) => {
+    let pending;
+    await handleReviewInteraction(env, { waitUntil(p) { pending = p; } }, {
+      type: 3, guild_id: "guild", channel_id: "private", application_id: "app", token: "token",
+      member: { roles: ["council"], user: { id: actor.id, username: actor.name } },
+      data: { custom_id: `review:${op}:1:${revision}` },
+    });
+    await pending;
+  };
+  try {
+    let r = await getReview(env, idea);
+    await view(B, "history", r.revision);
+    assert.equal((await getReview(env, idea)).author_id, null);
+    await directEditReview(env, r, idea, complete(), A, "Initial scores");
+    r = await getReview(env, idea);
+    for (const actor of [A, B, C]) await agreeReview(env, r, actor);
+    await reservePublish(env, r);
+    await finishPublish(env, r, "recorded", A);
+    r = await getReview(env, idea);
+    await view(B, "open", r.revision);
+    assert.equal((await getReview(env, idea)).status, "published");
+    assert.equal((await getReview(env, idea)).author_id, A.id);
+    await view(B, "reopen", r.revision);
+    r = await getReview(env, idea);
+    assert.equal(r.status, "open");
+    assert.equal(r.author_id, B.id);
+    assert.equal((await agreements(env, r)).length, 0);
+    assert.equal(nodes(shown).find((c) => c.label === "Submit changed scores").disabled, false);
+    const state = shown.components.find((c) => c.type === 17 && c.components.some((x) => x.content?.startsWith("**Current state**")));
+    const labels = state.components.find((c) => c.type === 1).components.map((c) => c.label);
+    assert.ok(labels.includes("Submit changed scores"));
+    assert.ok(!labels.includes("Submit Assessment"));
+    assert.ok(shown.components.at(-1).components.at(-1).components.some((c) => c.label === "Submit Assessment"));
+    assert.ok(!nodes(shown).some((c) => c.type === 2 && c.label === "Start assessment"));
+  } finally { globalThis.fetch = oldFetch; await mf.dispose(); }
 });
