@@ -8,12 +8,11 @@ See [`../idea-board-build-spec.md`](../idea-board-build-spec.md) for the full sp
 > config-only — new secrets, re-point the Activity URL mapping + Entry Point command
 > in the dev portal, recreate the forum tags/permissions. No code changes.
 
-## Council assessment
+## Council assessment (removed)
 
-See [ASSESSMENT.md](ASSESSMENT.md) for the native Discord review flow: shared,
-1–5 score dropdowns, a named editor with backed change requests, optional issue flags, and one second on the selected checks and three distinct Council members
-agreeing to the final scores before a score recommendation is recorded privately. No separate review
-website or new Discord command is needed. Tests require Node 22.13+ (24 recommended).
+The Council assessment (scoring rubric, Assess idea button, three-member Reviewed
+gate) was removed on 24 Nov 2026. Its old database tables (`council_reviews` and
+friends, migrations 0003-0006) are left in place, unused, so no data is lost.
 
 ## What it does
 
@@ -25,10 +24,6 @@ website or new Discord command is needed. Tests require Node 22.13+ (24 recommen
   Council role, with Submitted locking the post.
 - Form questions live in KV and are versioned, so old ideas keep rendering with the
   labels they were submitted under.
-- **Council idea review**: an off-site, Council-gated assessment surface (scoring
-  rubric + gate checks + two-person seconding) at `/admin/review?idea=N`, linked from
-  each idea's review copy and posting results back to Discord. See
-  [`ASSESSMENT.md`](ASSESSMENT.md).
 
 ## Stack
 
